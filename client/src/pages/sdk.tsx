@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ForgeProofLogo } from "@/components/ForgeProofLogo";
 import { useTheme } from "@/components/ThemeProvider";
+import { SEO } from "@/components/SEO";
 import {
   ArrowLeft,
   Moon,
@@ -256,6 +257,7 @@ export default function SdkPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      <SEO title="SDK Documentation" description="Python, TypeScript, and curl code examples for integrating with the ForgeProof attestation API." path="/sdk" />
       <header className="sticky top-0 z-[999] bg-background/80 backdrop-blur-xl border-b border-border">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between gap-4 h-16">

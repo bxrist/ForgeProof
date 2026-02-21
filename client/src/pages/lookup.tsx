@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ForgeProofLogo } from "@/components/ForgeProofLogo";
 import { useTheme } from "@/components/ThemeProvider";
+import { SEO } from "@/components/SEO";
 import {
   ArrowLeft,
   Search,
@@ -122,6 +123,7 @@ export default function LookupPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      <SEO title="Receipt Lookup" description="Look up and verify any attestation receipt by ID or entry hash." path="/lookup" />
       <header className="sticky top-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between gap-4 h-16">

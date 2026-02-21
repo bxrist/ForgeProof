@@ -3,12 +3,21 @@ import {
   repositories,
   attestationReceipts,
   apiKeys,
+  organizations,
+  orgMembers,
+  auditLogs,
   type InsertRepository,
   type Repository,
   type InsertAttestationReceipt,
   type AttestationReceipt,
   type InsertApiKey,
   type ApiKey,
+  type InsertOrganization,
+  type Organization,
+  type InsertOrgMember,
+  type OrgMember,
+  type InsertAuditLog,
+  type AuditLog,
 } from "@shared/schema";
 import type { User } from "@shared/models/auth";
 import { db } from "./db";
@@ -16,6 +25,7 @@ import { eq, desc, and, or, asc } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
+  updateUser(id: string, data: Partial<User>): Promise<void>;
 
   getRepositories(userId: string): Promise<Repository[]>;
   getRepository(id: number): Promise<Repository | undefined>;
@@ -38,12 +48,33 @@ export interface IStorage {
   createApiKey(key: InsertApiKey): Promise<ApiKey>;
   deleteApiKey(id: number, userId: string): Promise<void>;
   updateApiKeyLastUsed(id: number): Promise<void>;
+
+  getOrganizations(userId: string): Promise<Organization[]>;
+  getOrganization(id: number): Promise<Organization | undefined>;
+  getOrganizationBySlug(slug: string): Promise<Organization | undefined>;
+  createOrganization(org: InsertOrganization): Promise<Organization>;
+  updateOrganization(id: number, data: Partial<InsertOrganization>): Promise<void>;
+  deleteOrganization(id: number): Promise<void>;
+
+  getOrgMembers(orgId: number): Promise<OrgMember[]>;
+  getOrgMember(orgId: number, userId: string): Promise<OrgMember | undefined>;
+  addOrgMember(member: InsertOrgMember): Promise<OrgMember>;
+  removeOrgMember(orgId: number, userId: string): Promise<void>;
+  updateOrgMemberRole(orgId: number, userId: string, role: string): Promise<void>;
+
+  createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
+  getAuditLogs(userId?: string, limit?: number): Promise<AuditLog[]>;
+  getAuditLogsByResource(resourceType: string, resourceId: string): Promise<AuditLog[]>;
 }
 
 export class DatabaseStorage implements IStorage {
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user || undefined;
+  }
+
+  async updateUser(id: string, data: Partial<User>): Promise<void> {
+    await db.update(users).set({ ...data, updatedAt: new Date() }).where(eq(users.id, id));
   }
 
   async getRepositories(userId: string): Promise<Repository[]> {
@@ -136,6 +167,85 @@ export class DatabaseStorage implements IStorage {
 
   async updateApiKeyLastUsed(id: number): Promise<void> {
     await db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, id));
+  }
+
+  async getOrganizations(userId: string): Promise<Organization[]> {
+    const owned = await db.select().from(organizations).where(eq(organizations.ownerId, userId));
+    const memberships = await db.select().from(orgMembers).where(eq(orgMembers.userId, userId));
+    const memberOrgIds = memberships.map(m => m.orgId);
+    if (memberOrgIds.length === 0) return owned;
+    const memberOrgs = await Promise.all(memberOrgIds.map(id => this.getOrganization(id)));
+    const allOrgs = [...owned];
+    for (const org of memberOrgs) {
+      if (org && !allOrgs.find(o => o.id === org.id)) allOrgs.push(org);
+    }
+    return allOrgs;
+  }
+
+  async getOrganization(id: number): Promise<Organization | undefined> {
+    const [org] = await db.select().from(organizations).where(eq(organizations.id, id));
+    return org || undefined;
+  }
+
+  async getOrganizationBySlug(slug: string): Promise<Organization | undefined> {
+    const [org] = await db.select().from(organizations).where(eq(organizations.slug, slug));
+    return org || undefined;
+  }
+
+  async createOrganization(org: InsertOrganization): Promise<Organization> {
+    const [created] = await db.insert(organizations).values(org).returning();
+    return created;
+  }
+
+  async updateOrganization(id: number, data: Partial<InsertOrganization>): Promise<void> {
+    await db.update(organizations).set(data).where(eq(organizations.id, id));
+  }
+
+  async deleteOrganization(id: number): Promise<void> {
+    await db.delete(orgMembers).where(eq(orgMembers.orgId, id));
+    await db.delete(organizations).where(eq(organizations.id, id));
+  }
+
+  async getOrgMembers(orgId: number): Promise<OrgMember[]> {
+    return db.select().from(orgMembers).where(eq(orgMembers.orgId, orgId));
+  }
+
+  async getOrgMember(orgId: number, userId: string): Promise<OrgMember | undefined> {
+    const [member] = await db.select().from(orgMembers).where(
+      and(eq(orgMembers.orgId, orgId), eq(orgMembers.userId, userId))
+    );
+    return member || undefined;
+  }
+
+  async addOrgMember(member: InsertOrgMember): Promise<OrgMember> {
+    const [created] = await db.insert(orgMembers).values(member).returning();
+    return created;
+  }
+
+  async removeOrgMember(orgId: number, userId: string): Promise<void> {
+    await db.delete(orgMembers).where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.userId, userId)));
+  }
+
+  async updateOrgMemberRole(orgId: number, userId: string, role: string): Promise<void> {
+    await db.update(orgMembers).set({ role }).where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.userId, userId)));
+  }
+
+  async createAuditLog(log: InsertAuditLog): Promise<AuditLog> {
+    const [created] = await db.insert(auditLogs).values(log).returning();
+    return created;
+  }
+
+  async getAuditLogs(userId?: string, limit: number = 100): Promise<AuditLog[]> {
+    if (userId) {
+      return db.select().from(auditLogs).where(eq(auditLogs.userId, userId)).orderBy(desc(auditLogs.createdAt)).limit(limit);
+    }
+    return db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt)).limit(limit);
+  }
+
+  async getAuditLogsByResource(resourceType: string, resourceId: string): Promise<AuditLog[]> {
+    return db.select().from(auditLogs).where(
+      and(eq(auditLogs.resourceType, resourceType), eq(auditLogs.resourceId, resourceId))
+    ).orderBy(desc(auditLogs.createdAt));
   }
 }
 

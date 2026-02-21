@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
@@ -7,14 +7,16 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { AttestationReceipt, Repository, ApiKey } from "@shared/schema";
+import type { AttestationReceipt, Repository, ApiKey, Organization, AuditLog } from "@shared/schema";
 import { ForgeProofLogo } from "@/components/ForgeProofLogo";
 import { useTheme } from "@/components/ThemeProvider";
 import { OnboardingWalkthrough } from "@/components/OnboardingWalkthrough";
@@ -43,8 +45,41 @@ import {
   Filter,
   CheckCircle2,
   Info,
+  Building,
+  Users,
+  Activity,
+  Mail,
+  Save,
 } from "lucide-react";
 import { SiGithub } from "react-icons/si";
+import { SEO } from "@/components/SEO";
+
+function formatRelativeTime(date: Date | string | null | undefined): string {
+  if (!date) return "";
+  const now = new Date();
+  const then = new Date(date);
+  const diffMs = now.getTime() - then.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} minute${diffMin === 1 ? "" : "s"} ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr} hour${diffHr === 1 ? "" : "s"} ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 30) return `${diffDay} day${diffDay === 1 ? "" : "s"} ago`;
+  const diffMonth = Math.floor(diffDay / 30);
+  if (diffMonth < 12) return `${diffMonth} month${diffMonth === 1 ? "" : "s"} ago`;
+  const diffYear = Math.floor(diffMonth / 12);
+  return `${diffYear} year${diffYear === 1 ? "" : "s"} ago`;
+}
+
+function getAuditLogIcon(action: string) {
+  if (action.startsWith("api_key")) return Key;
+  if (action.startsWith("repository")) return GitBranch;
+  if (action.startsWith("org")) return Building;
+  if (action.startsWith("notifications")) return Mail;
+  return Activity;
+}
 
 function StatCard({ label, value, icon: Icon, loading }: { label: string; value: string | number; icon: any; loading?: boolean }) {
   return (
@@ -97,7 +132,7 @@ function AttestationRow({ receipt }: { receipt: AttestationReceipt }) {
   );
 }
 
-function RepositoryRow({ repo }: { repo: Repository }) {
+function RepositoryRow({ repo, onDelete }: { repo: Repository; onDelete: (id: number) => void }) {
   return (
     <div className="flex items-center gap-4 p-4" data-testid={`row-repo-${repo.id}`}>
       <div className="w-9 h-9 rounded-md bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
@@ -112,6 +147,14 @@ function RepositoryRow({ repo }: { repo: Repository }) {
           <ExternalLink className="w-4 h-4" />
         </Button>
       </a>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={() => onDelete(repo.id)}
+        data-testid={`button-delete-repo-${repo.id}`}
+      >
+        <Trash2 className="w-4 h-4 text-muted-foreground" />
+      </Button>
     </div>
   );
 }
@@ -163,6 +206,7 @@ function CreateApiKeyDialog() {
     onSuccess: (data) => {
       setGeneratedKey(data.fullKey);
       queryClient.invalidateQueries({ queryKey: ["/api/api-keys"] });
+      toast({ title: "API key created successfully" });
     },
     onError: () => {
       toast({ title: "Failed to create API key", variant: "destructive" });
@@ -230,6 +274,75 @@ function CreateApiKeyDialog() {
   );
 }
 
+function CreateOrgDialog() {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [open, setOpen] = useState(false);
+  const { toast } = useToast();
+
+  const createMutation = useMutation({
+    mutationFn: async (data: { name: string; description: string }) => {
+      const res = await apiRequest("POST", "/api/organizations", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/organizations"] });
+      toast({ title: "Team created successfully" });
+      setOpen(false);
+      setName("");
+      setDescription("");
+    },
+    onError: () => {
+      toast({ title: "Failed to create team", variant: "destructive" });
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" data-testid="button-create-team">
+          <Plus className="w-3.5 h-3.5 mr-1.5" />
+          Create Team
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Create Team</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <label className="text-sm font-medium mb-1.5 block">Team Name</label>
+            <Input
+              placeholder="e.g., Engineering"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              data-testid="input-team-name"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium mb-1.5 block">Description</label>
+            <Textarea
+              placeholder="What does this team work on?"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="resize-none"
+              data-testid="input-team-description"
+            />
+          </div>
+          <Button
+            className="w-full"
+            onClick={() => createMutation.mutate({ name, description })}
+            disabled={!name.trim() || createMutation.isPending}
+            data-testid="button-submit-team"
+          >
+            {createMutation.isPending ? "Creating..." : "Create Team"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function EmptyState({ icon: Icon, title, desc }: { icon: any; title: string; desc: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -258,6 +371,219 @@ function LoadingRows() {
   );
 }
 
+function LoadingCards() {
+  return (
+    <div className="space-y-3 p-4">
+      {[1, 2, 3].map((i) => (
+        <Card key={i} className="p-4">
+          <div className="flex items-center gap-4">
+            <Skeleton className="w-10 h-10 rounded-md" />
+            <div className="flex-1 space-y-1.5">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-3 w-56" />
+            </div>
+            <Skeleton className="h-8 w-20 rounded-md" />
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function LoadingTimeline() {
+  return (
+    <div className="space-y-3 p-4">
+      {[1, 2, 3, 4, 5].map((i) => (
+        <div key={i} className="flex items-start gap-3">
+          <Skeleton className="w-8 h-8 rounded-md shrink-0" />
+          <div className="flex-1 space-y-1.5">
+            <Skeleton className="h-4 w-64" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+interface GitHubRepo {
+  id: number;
+  name: string;
+  full_name: string;
+  url: string;
+  description: string | null;
+  default_branch: string;
+  private: boolean;
+}
+
+function GitHubRepoSyncPanel() {
+  const { toast } = useToast();
+  const [ghRepos, setGhRepos] = useState<GitHubRepo[]>([]);
+  const [loadingRepos, setLoadingRepos] = useState(false);
+  const [showPanel, setShowPanel] = useState(false);
+
+  const fetchGhRepos = async () => {
+    setLoadingRepos(true);
+    try {
+      const res = await fetch("/api/github/repos", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch");
+      const data = await res.json();
+      setGhRepos(data);
+      setShowPanel(true);
+    } catch {
+      toast({ title: "Failed to fetch GitHub repos", variant: "destructive" });
+    } finally {
+      setLoadingRepos(false);
+    }
+  };
+
+  const addRepoMutation = useMutation({
+    mutationFn: async (repo: GitHubRepo) => {
+      const res = await apiRequest("POST", "/api/repositories", {
+        githubId: repo.id,
+        name: repo.name,
+        fullName: repo.full_name,
+        url: repo.url,
+        defaultBranch: repo.default_branch,
+        description: repo.description,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/repositories"] });
+      toast({ title: "Repository added" });
+    },
+    onError: () => {
+      toast({ title: "Failed to add repository", variant: "destructive" });
+    },
+  });
+
+  return (
+    <div>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={fetchGhRepos}
+        disabled={loadingRepos}
+        data-testid="button-sync-gh-repos"
+      >
+        <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${loadingRepos ? "animate-spin" : ""}`} />
+        Sync Repos
+      </Button>
+      {showPanel && ghRepos.length > 0 && (
+        <Card className="mt-4">
+          <div className="flex items-center justify-between gap-4 p-4 border-b border-border">
+            <h3 className="font-semibold text-sm">Available GitHub Repos</h3>
+            <Badge variant="outline" className="text-xs">{ghRepos.length} repos</Badge>
+          </div>
+          <div className="divide-y divide-border max-h-80 overflow-y-auto">
+            {ghRepos.map((repo) => (
+              <div key={repo.id} className="flex items-center gap-4 p-3" data-testid={`row-gh-repo-${repo.id}`}>
+                <div className="w-8 h-8 rounded-md bg-muted flex items-center justify-center shrink-0">
+                  <SiGithub className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-sm truncate">{repo.full_name}</div>
+                  {repo.description && (
+                    <div className="text-xs text-muted-foreground truncate">{repo.description}</div>
+                  )}
+                </div>
+                {repo.private && <Badge variant="secondary" className="text-xs">Private</Badge>}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => addRepoMutation.mutate(repo)}
+                  disabled={addRepoMutation.isPending}
+                  data-testid={`button-add-repo-${repo.id}`}
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1" />
+                  Add
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+      {showPanel && ghRepos.length === 0 && !loadingRepos && (
+        <p className="text-sm text-muted-foreground mt-3">No repos found on your GitHub account.</p>
+      )}
+    </div>
+  );
+}
+
+function NotificationPreferences() {
+  const { toast } = useToast();
+  const { data: prefs, isLoading } = useQuery<{ notificationEmail: string | null }>({
+    queryKey: ["/api/notifications/preferences"],
+  });
+  const [email, setEmail] = useState("");
+  const [initialized, setInitialized] = useState(false);
+
+  useEffect(() => {
+    if (prefs && !initialized) {
+      setEmail(prefs.notificationEmail || "");
+      setInitialized(true);
+    }
+  }, [prefs, initialized]);
+
+  const saveMutation = useMutation({
+    mutationFn: async (notificationEmail: string) => {
+      await apiRequest("POST", "/api/notifications/preferences", { notificationEmail });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/notifications/preferences"] });
+      toast({ title: "Notification preferences saved" });
+    },
+    onError: () => {
+      toast({ title: "Failed to save preferences", variant: "destructive" });
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <div className="p-4 space-y-2">
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-9 w-full" />
+      </div>
+    );
+  }
+
+  return (
+    <Card className="mt-4">
+      <div className="p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Mail className="w-4 h-4 text-muted-foreground" />
+          <h3 className="font-semibold text-sm">Notification Preferences</h3>
+        </div>
+        <div className="flex items-center gap-2">
+          <Input
+            type="email"
+            placeholder="Enter notification email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            onBlur={() => {
+              if (email !== (prefs?.notificationEmail || "")) {
+                saveMutation.mutate(email);
+              }
+            }}
+            data-testid="input-notification-email"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => saveMutation.mutate(email)}
+            disabled={saveMutation.isPending}
+            data-testid="button-save-notification-email"
+          >
+            <Save className="w-3.5 h-3.5 mr-1.5" />
+            Save
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export default function DashboardPage() {
   const { user, isLoading: authLoading, logout } = useAuth();
   const [, navigate] = useLocation();
@@ -266,6 +592,17 @@ export default function DashboardPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
   const [complianceFilter, setComplianceFilter] = useState("all");
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("github") === "connected") {
+      toast({ title: "GitHub connected successfully" });
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (params.get("github") === "error") {
+      toast({ title: "Failed to connect GitHub", variant: "destructive" });
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
 
   const { data: receipts, isLoading: receiptsLoading } = useQuery<AttestationReceipt[]>({
     queryKey: ["/api/attestations"],
@@ -281,6 +618,14 @@ export default function DashboardPage() {
 
   const { data: githubStatus } = useQuery<{ configured: boolean; connected: boolean }>({
     queryKey: ["/api/github/status"],
+  });
+
+  const { data: orgs, isLoading: orgsLoading } = useQuery<Organization[]>({
+    queryKey: ["/api/organizations"],
+  });
+
+  const { data: auditLogs, isLoading: auditLogsLoading } = useQuery<AuditLog[]>({
+    queryKey: ["/api/audit-logs"],
   });
 
   const uniqueProviders = useMemo(() => {
@@ -313,6 +658,22 @@ export default function DashboardPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/api-keys"] });
       toast({ title: "API key deleted" });
     },
+    onError: () => {
+      toast({ title: "Failed to delete API key", variant: "destructive" });
+    },
+  });
+
+  const deleteRepoMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/repositories/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/repositories"] });
+      toast({ title: "Repository removed" });
+    },
+    onError: () => {
+      toast({ title: "Failed to remove repository", variant: "destructive" });
+    },
   });
 
   const syncReposMutation = useMutation({
@@ -326,6 +687,19 @@ export default function DashboardPage() {
     },
     onError: () => {
       toast({ title: "Failed to sync repositories", variant: "destructive" });
+    },
+  });
+
+  const deleteOrgMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/organizations/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/organizations"] });
+      toast({ title: "Team deleted" });
+    },
+    onError: () => {
+      toast({ title: "Failed to delete team", variant: "destructive" });
     },
   });
 
@@ -344,6 +718,7 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      <SEO title="Dashboard" description="Manage your attestation receipts, repositories, API keys, and team settings." path="/dashboard" />
       <OnboardingWalkthrough />
       <header className="sticky top-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -414,7 +789,7 @@ export default function DashboardPage() {
         </div>
 
         <Tabs defaultValue="attestations" className="space-y-4">
-          <TabsList>
+          <TabsList className="flex-wrap">
             <TabsTrigger value="attestations" data-testid="tab-attestations">
               <FileCheck className="w-4 h-4 mr-1.5" />
               Attestations
@@ -426,6 +801,14 @@ export default function DashboardPage() {
             <TabsTrigger value="api-keys" data-testid="tab-api-keys">
               <Key className="w-4 h-4 mr-1.5" />
               API Keys
+            </TabsTrigger>
+            <TabsTrigger value="teams" data-testid="tab-teams">
+              <Users className="w-4 h-4 mr-1.5" />
+              Teams
+            </TabsTrigger>
+            <TabsTrigger value="activity-log" data-testid="tab-activity-log">
+              <Activity className="w-4 h-4 mr-1.5" />
+              Activity Log
             </TabsTrigger>
           </TabsList>
 
@@ -511,6 +894,7 @@ export default function DashboardPage() {
                         <div className="text-xs text-muted-foreground">Your GitHub account is linked</div>
                       </div>
                     </div>
+                    <GitHubRepoSyncPanel />
                   </>
                 ) : !githubStatus?.configured ? (
                   <>
@@ -576,7 +960,7 @@ export default function DashboardPage() {
               ) : repos && repos.length > 0 ? (
                 <div className="divide-y divide-border">
                   {repos.map((r) => (
-                    <RepositoryRow key={r.id} repo={r} />
+                    <RepositoryRow key={r.id} repo={r} onDelete={(id) => deleteRepoMutation.mutate(id)} />
                   ))}
                 </div>
               ) : (
@@ -608,6 +992,99 @@ export default function DashboardPage() {
                   icon={Key}
                   title="No API keys"
                   desc="Create an API key to allow AI agents to submit attestation receipts programmatically."
+                />
+              )}
+            </Card>
+            <NotificationPreferences />
+          </TabsContent>
+
+          <TabsContent value="teams">
+            <Card>
+              <div className="flex items-center justify-between gap-4 p-4 border-b border-border">
+                <h3 className="font-semibold text-sm">Teams</h3>
+                <CreateOrgDialog />
+              </div>
+              {orgsLoading ? (
+                <LoadingCards />
+              ) : orgs && orgs.length > 0 ? (
+                <div className="divide-y divide-border">
+                  {orgs.map((org) => (
+                    <div key={org.id} className="flex items-center gap-4 p-4" data-testid={`row-team-${org.id}`}>
+                      <div className="w-9 h-9 rounded-md bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                        <Building className="w-4.5 h-4.5 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm">{org.name}</div>
+                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                          <Badge variant="outline" className="text-xs">{org.slug}</Badge>
+                          {org.description && (
+                            <span className="text-xs text-muted-foreground truncate">{org.description}</span>
+                          )}
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => deleteOrgMutation.mutate(org.id)}
+                        data-testid={`button-delete-team-${org.id}`}
+                      >
+                        <Trash2 className="w-4 h-4 text-muted-foreground" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  icon={Users}
+                  title="No teams yet"
+                  desc="Create a team to collaborate with others on attestation receipts."
+                />
+              )}
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="activity-log">
+            <Card>
+              <div className="flex items-center justify-between gap-4 p-4 border-b border-border">
+                <h3 className="font-semibold text-sm">Activity Log</h3>
+                <Badge variant="outline" className="text-xs" data-testid="text-audit-log-count">
+                  {auditLogs?.length ?? 0} events
+                </Badge>
+              </div>
+              {auditLogsLoading ? (
+                <LoadingTimeline />
+              ) : auditLogs && auditLogs.length > 0 ? (
+                <div className="divide-y divide-border">
+                  {auditLogs.map((log) => {
+                    const LogIcon = getAuditLogIcon(log.action);
+                    return (
+                      <div key={log.id} className="flex items-start gap-3 p-4" data-testid={`row-audit-log-${log.id}`}>
+                        <div className="w-8 h-8 rounded-md bg-muted flex items-center justify-center shrink-0 mt-0.5">
+                          <LogIcon className="w-4 h-4 text-muted-foreground" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-sm">{log.action.replace(/[._]/g, " ")}</div>
+                          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                            {log.resourceType && (
+                              <Badge variant="secondary" className="text-xs">{log.resourceType}</Badge>
+                            )}
+                            {log.resourceId && (
+                              <span className="text-xs text-muted-foreground">#{log.resourceId}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-xs text-muted-foreground whitespace-nowrap shrink-0" data-testid={`text-audit-log-time-${log.id}`}>
+                          {formatRelativeTime(log.createdAt)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <EmptyState
+                  icon={Activity}
+                  title="No activity yet"
+                  desc="Your activity log will appear here as you use ForgeProof."
                 />
               )}
             </Card>

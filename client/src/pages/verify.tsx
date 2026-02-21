@@ -21,6 +21,7 @@ import {
   Sun,
 } from "lucide-react";
 import { useTheme } from "@/components/ThemeProvider";
+import { SEO } from "@/components/SEO";
 
 interface ChainEntry {
   id: number;
@@ -131,6 +132,7 @@ export default function VerifyPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      <SEO title="Hash Chain Verification" description="Independently verify the integrity of every attestation in the ForgeProof hash chain ledger." path="/verify" />
       <header className="sticky top-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between gap-4 h-16">

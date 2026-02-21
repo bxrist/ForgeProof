@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { useTheme } from "@/components/ThemeProvider";
+import { SEO } from "@/components/SEO";
 
 function StatCard({ label, value, icon: Icon, loading }: { label: string; value: string | number; icon: any; loading?: boolean }) {
   return (
@@ -130,6 +131,7 @@ export default function DemoPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      <SEO title="Demo" description="Explore ForgeProof's self-attesting seed data. View cryptographic attestation receipts without login." path="/demo" />
       <header className="sticky top-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between gap-4 h-16">

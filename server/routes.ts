@@ -219,7 +219,7 @@ export async function registerRoutes(
             description: repo.description,
           });
         } else {
-          await storage.createRepository({
+          const created = await storage.createRepository({
             userId,
             githubId: repo.githubId,
             name: repo.name,
@@ -228,6 +228,7 @@ export async function registerRoutes(
             defaultBranch: repo.defaultBranch,
             description: repo.description,
           });
+          await storage.createAuditLog({ userId, action: "repository.created", resourceType: "repository", resourceId: String(created.id) });
         }
         synced++;
       }
@@ -306,6 +307,32 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/repositories", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as any;
+      const userId = user.claims?.sub || user.id;
+      const { githubId, name, fullName, url, defaultBranch, description } = req.body;
+      if (!name || !fullName || !url) {
+        return res.status(400).json({ message: "name, fullName, and url are required" });
+      }
+      const existing = githubId ? await storage.getRepositoryByGithubId(githubId, userId) : null;
+      if (existing) return res.status(409).json({ message: "Repository already added" });
+      const repo = await storage.createRepository({
+        userId,
+        githubId: githubId || 0,
+        name,
+        fullName,
+        url,
+        defaultBranch: defaultBranch || "main",
+        description: description || null,
+      });
+      await storage.createAuditLog({ userId, action: "repository.created", resourceType: "repository", resourceId: String(repo.id) });
+      res.json(repo);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to add repository" });
+    }
+  });
+
   app.delete("/api/repositories/:id", isAuthenticated, async (req, res) => {
     const id = parseInt(req.params.id as string);
     if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
@@ -315,6 +342,7 @@ export async function registerRoutes(
     if (!repo) return res.status(404).json({ message: "Not found" });
     if (repo.userId !== userId) return res.status(403).json({ message: "Forbidden" });
     await storage.deleteRepository(id);
+    await storage.createAuditLog({ userId, action: "repository.deleted", resourceType: "repository", resourceId: String(req.params.id) });
     res.json({ message: "Repository removed" });
   });
 
@@ -361,6 +389,17 @@ export async function registerRoutes(
       const tokenData = await tokenRes.json() as any;
 
       if (tokenData.access_token) {
+        const ghUserRes = await fetch("https://api.github.com/user", {
+          headers: { Authorization: `Bearer ${tokenData.access_token}`, Accept: "application/json" },
+        });
+        const githubUser = await ghUserRes.json() as any;
+
+        if (req.isAuthenticated && req.isAuthenticated()) {
+          const userId = (req.user as any)?.claims?.sub || (req.user as any)?.id;
+          if (userId) {
+            await storage.updateUser(userId, { githubToken: tokenData.access_token, githubUsername: githubUser.login });
+          }
+        }
         res.redirect("/dashboard?github=connected");
       } else {
         res.redirect("/dashboard?github=error");
@@ -370,9 +409,41 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/github/status", isAuthenticated, (_req, res) => {
+  app.get("/api/github/status", isAuthenticated, async (req, res) => {
     const configured = !!(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET);
-    res.json({ configured, connected: false });
+    const user = req.user as any;
+    const userId = user?.claims?.sub || user?.id;
+    const dbUser = userId ? await storage.getUser(userId) : null;
+    const connected = !!(dbUser?.githubToken);
+    const githubUsername = dbUser?.githubUsername || null;
+    res.json({ configured, connected, githubUsername });
+  });
+
+  app.get("/api/github/repos", isAuthenticated, async (req, res) => {
+    const user = req.user as any;
+    const userId = user?.claims?.sub || user?.id;
+    const dbUser = userId ? await storage.getUser(userId) : null;
+    if (!dbUser?.githubToken) {
+      return res.status(400).json({ message: "GitHub not connected" });
+    }
+    try {
+      const ghRes = await fetch("https://api.github.com/user/repos?per_page=100&sort=updated", {
+        headers: { Authorization: `Bearer ${dbUser.githubToken}`, Accept: "application/json" },
+      });
+      if (!ghRes.ok) return res.status(502).json({ message: "Failed to fetch GitHub repos" });
+      const repos = await ghRes.json() as any[];
+      res.json(repos.map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        full_name: r.full_name,
+        url: r.html_url,
+        description: r.description,
+        default_branch: r.default_branch,
+        private: r.private,
+      })));
+    } catch {
+      res.status(502).json({ message: "Failed to fetch GitHub repos" });
+    }
   });
 
   // ─── GitHub Webhook ──────────────────────────────────
@@ -465,6 +536,7 @@ export async function registerRoutes(
       keyHash,
       keyPrefix,
     });
+    await storage.createAuditLog({ userId, action: "api_key.created", resourceType: "api_key", resourceId: String(apiKey.id) });
     res.json({ ...apiKey, fullKey });
   });
 
@@ -474,7 +546,94 @@ export async function registerRoutes(
     const user = req.user as any;
     const userId = user.claims?.sub || user.id;
     await storage.deleteApiKey(id, userId);
+    await storage.createAuditLog({ userId, action: "api_key.deleted", resourceType: "api_key", resourceId: String(req.params.id) });
     res.json({ message: "Deleted" });
+  });
+
+  // ─── Organizations ──────────────────────────────────
+  app.get("/api/organizations", isAuthenticated, async (req, res) => {
+    const user = req.user as any;
+    const userId = user?.claims?.sub || user?.id;
+    const orgs = await storage.getOrganizations(userId);
+    res.json(orgs);
+  });
+
+  app.post("/api/organizations", isAuthenticated, async (req, res) => {
+    const user = req.user as any;
+    const userId = user?.claims?.sub || user?.id;
+    const { name, description } = req.body;
+    if (!name) return res.status(400).json({ message: "Name is required" });
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const existing = await storage.getOrganizationBySlug(slug);
+    if (existing) return res.status(409).json({ message: "Organization slug already taken" });
+    const org = await storage.createOrganization({ name, slug, ownerId: userId, description: description || null });
+    await storage.addOrgMember({ orgId: org.id, userId, role: "owner" });
+    await storage.createAuditLog({ userId, action: "org.created", resourceType: "organization", resourceId: String(org.id), metadata: { name } });
+    res.json(org);
+  });
+
+  app.get("/api/organizations/:id/members", isAuthenticated, async (req, res) => {
+    const orgId = parseInt(req.params.id as string);
+    const user = req.user as any;
+    const userId = user?.claims?.sub || user?.id;
+    const member = await storage.getOrgMember(orgId, userId);
+    if (!member) return res.status(403).json({ message: "Not a member of this organization" });
+    const members = await storage.getOrgMembers(orgId);
+    res.json(members);
+  });
+
+  app.post("/api/organizations/:id/members", isAuthenticated, async (req, res) => {
+    const orgId = parseInt(req.params.id as string);
+    const user = req.user as any;
+    const userId = user?.claims?.sub || user?.id;
+    const member = await storage.getOrgMember(orgId, userId);
+    if (!member || (member.role !== "owner" && member.role !== "admin")) {
+      return res.status(403).json({ message: "Only owners and admins can add members" });
+    }
+    const { userId: newUserId, role } = req.body;
+    if (!newUserId) return res.status(400).json({ message: "userId is required" });
+    const existing = await storage.getOrgMember(orgId, newUserId);
+    if (existing) return res.status(409).json({ message: "User is already a member" });
+    const newMember = await storage.addOrgMember({ orgId, userId: newUserId, role: role || "member" });
+    await storage.createAuditLog({ userId, action: "org.member_added", resourceType: "organization", resourceId: String(orgId), metadata: { addedUserId: newUserId, role: role || "member" } });
+    res.json(newMember);
+  });
+
+  app.delete("/api/organizations/:id", isAuthenticated, async (req, res) => {
+    const orgId = parseInt(req.params.id as string);
+    const user = req.user as any;
+    const userId = user?.claims?.sub || user?.id;
+    const org = await storage.getOrganization(orgId);
+    if (!org || org.ownerId !== userId) return res.status(403).json({ message: "Only the owner can delete this organization" });
+    await storage.deleteOrganization(orgId);
+    await storage.createAuditLog({ userId, action: "org.deleted", resourceType: "organization", resourceId: String(orgId) });
+    res.json({ message: "Organization deleted" });
+  });
+
+  // ─── Audit Logs ──────────────────────────────────
+  app.get("/api/audit-logs", isAuthenticated, async (req, res) => {
+    const user = req.user as any;
+    const userId = user?.claims?.sub || user?.id;
+    const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
+    const logs = await storage.getAuditLogs(userId, limit);
+    res.json(logs);
+  });
+
+  // ─── Notification Preferences ──────────────────────
+  app.get("/api/notifications/preferences", isAuthenticated, async (req, res) => {
+    const user = req.user as any;
+    const userId = user?.claims?.sub || user?.id;
+    const dbUser = await storage.getUser(userId);
+    res.json({ notificationEmail: dbUser?.notificationEmail || null });
+  });
+
+  app.post("/api/notifications/preferences", isAuthenticated, async (req, res) => {
+    const user = req.user as any;
+    const userId = user?.claims?.sub || user?.id;
+    const { notificationEmail } = req.body;
+    await storage.updateUser(userId, { notificationEmail: notificationEmail || null });
+    await storage.createAuditLog({ userId, action: "notifications.updated", resourceType: "user", resourceId: userId });
+    res.json({ notificationEmail });
   });
 
   // ─── Public Demo ──────────────────────────────────

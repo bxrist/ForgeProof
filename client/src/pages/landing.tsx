@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { ForgeProofLogo } from "@/components/ForgeProofLogo";
+import { SEO } from "@/components/SEO";
 import { useTheme } from "@/components/ThemeProvider";
 import { Moon, Sun } from "lucide-react";
 
@@ -137,6 +138,7 @@ function Navbar() {
             <a href="#sovereignty" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">Sovereignty</a>
             <a href="#how-it-works" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">How It Works</a>
             <a href="#use-cases" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">Use Cases</a>
+            <a href="#features" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">Features</a>
             <a href="#api" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">API</a>
             <Link href="/sdk" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">SDK</Link>
           </div>
@@ -196,10 +198,15 @@ function Navbar() {
             animate={{ opacity: 1, height: "auto" }}
             className="md:hidden pb-4 space-y-2"
           >
-            <a href="#sovereignty" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground">Sovereignty</a>
-            <a href="#how-it-works" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground">How It Works</a>
-            <a href="#use-cases" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground">Use Cases</a>
-            <a href="#api" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground">API</a>
+            <a href="#sovereignty" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>Sovereignty</a>
+            <a href="#how-it-works" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>How It Works</a>
+            <a href="#use-cases" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>Use Cases</a>
+            <a href="#features" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>Features</a>
+            <a href="#api" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>API</a>
+            <Link href="/sdk" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>SDK</Link>
+            <Link href="/analytics" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>Analytics</Link>
+            <Link href="/verify" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>Verify</Link>
+            <Link href="/lookup" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>Lookup</Link>
             <div className="flex flex-col gap-2 pt-2">
               <a href="https://github.com" target="_blank" rel="noopener noreferrer">
                 <Button variant="outline" size="sm" className="w-full">
@@ -207,6 +214,10 @@ function Navbar() {
                   View on GitHub
                 </Button>
               </a>
+              <Button variant="outline" size="sm" className="w-full" onClick={toggleTheme}>
+                {theme === "dark" ? <Sun className="w-4 h-4 mr-1.5" /> : <Moon className="w-4 h-4 mr-1.5" />}
+                {theme === "dark" ? "Light Mode" : "Dark Mode"}
+              </Button>
               {isAuthenticated ? (
                 <Link href="/dashboard">
                   <Button size="sm" className="w-full">Dashboard</Button>
@@ -624,6 +635,106 @@ function UseCasesSection() {
   );
 }
 
+function PlatformFeaturesSection() {
+  const features = [
+    {
+      icon: Link2,
+      title: "Hash Chain Verification",
+      desc: "Every attestation is cryptographically linked to the previous entry using SHA-256, creating an immutable, tamper-evident ledger. Verify chain integrity at /verify.",
+    },
+    {
+      icon: GitBranch,
+      title: "GitHub Integration",
+      desc: "Connect your GitHub account via OAuth, sync repositories, and automatically attest code on every push event through webhooks.",
+    },
+    {
+      icon: Terminal,
+      title: "MCP Tool Server",
+      desc: "Expose ForgeProof as a Model Context Protocol server. AI agents can discover and call attest, lookup, verify, and batch attest tools.",
+    },
+    {
+      icon: Cpu,
+      title: "GPT Actions & OpenAPI",
+      desc: "Ready-to-use OpenAPI spec at /api/openapi.json. Configure ChatGPT custom GPTs to create attestations directly from conversations.",
+    },
+    {
+      icon: Users,
+      title: "Team Collaboration",
+      desc: "Create organizations, invite team members, and share repositories and attestation data across your team.",
+    },
+    {
+      icon: Eye,
+      title: "Analytics Dashboard",
+      desc: "Visual analytics showing attestation data by AI provider, model, country of origin, and compliance status.",
+    },
+    {
+      icon: Code2,
+      title: "SDK & Code Examples",
+      desc: "Python, TypeScript, and curl examples for every API endpoint. Copy-paste integration in minutes.",
+    },
+    {
+      icon: Fingerprint,
+      title: "Badge Embeds",
+      desc: "Generate SVG badges for individual attestations or entire repositories. Embed proof of provenance in your README.",
+    },
+    {
+      icon: FileCheck,
+      title: "Certificate Export",
+      desc: "Export printable HTML certificates for any attestation receipt. Includes signature verification status and full hash chain data.",
+    },
+    {
+      icon: MapPin,
+      title: "Geographic Compliance",
+      desc: "Declare and verify the country of origin for every AI-generated code file. Track compliance across jurisdictions.",
+    },
+    {
+      icon: Hash,
+      title: "Public Lookup",
+      desc: "Anyone can independently verify any attestation receipt by ID or hash at /lookup. No login required.",
+    },
+    {
+      icon: Layers,
+      title: "Audit Logging",
+      desc: "Every action is logged with timestamps, user IDs, and resource details. Full activity trail for compliance and security.",
+    },
+  ];
+
+  return (
+    <section id="features" className="py-20 sm:py-28">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <FadeIn>
+          <div className="text-center max-w-3xl mx-auto mb-16">
+            <Badge variant="outline" className="mb-4">
+              <Layers className="w-3 h-3 mr-1" />
+              Platform Features
+            </Badge>
+            <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight mb-4">
+              Everything You Need for Code Provenance
+            </h2>
+            <p className="text-lg text-muted-foreground">
+              From cryptographic attestation to team collaboration, ForgeProof provides a complete platform for tracking AI-generated code.
+            </p>
+          </div>
+        </FadeIn>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {features.map((feature, i) => (
+            <FadeIn key={feature.title} delay={i * 0.06}>
+              <Card className="p-5 h-full" data-testid={`card-feature-${i}`}>
+                <div className="w-10 h-10 rounded-full bg-primary/10 dark:bg-primary/20 flex items-center justify-center mb-4">
+                  <feature.icon className="w-5 h-5 text-primary" />
+                </div>
+                <h4 className="font-semibold mb-1.5">{feature.title}</h4>
+                <p className="text-sm text-muted-foreground leading-relaxed">{feature.desc}</p>
+              </Card>
+            </FadeIn>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ApiSection() {
   const [activeAgent, setActiveAgent] = useState<"openai" | "claude" | "replit">("openai");
 
@@ -821,19 +932,52 @@ function Footer() {
   return (
     <footer className="border-t border-border bg-card/50 py-12">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-2">
-            <ForgeProofLogo size={36} />
-            <span className="font-display font-bold tracking-tight">ForgeProof</span>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <ForgeProofLogo size={36} />
+              <span className="font-display font-bold tracking-tight">ForgeProof</span>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Code provenance for the AI era.
+            </p>
+            <div className="text-sm text-muted-foreground">
+              &copy; 2026 ForgeProof. Open Source.
+            </div>
           </div>
-          <div className="flex items-center gap-6 text-sm text-muted-foreground">
-            <a href="#sovereignty" className="hover:text-foreground transition-colors">Sovereignty</a>
-            <a href="#how-it-works" className="hover:text-foreground transition-colors">How It Works</a>
-            <a href="#use-cases" className="hover:text-foreground transition-colors">Use Cases</a>
-            <a href="#api" className="hover:text-foreground transition-colors">API</a>
+
+          <div>
+            <h4 className="font-semibold text-sm mb-3">Platform</h4>
+            <ul className="space-y-2 text-sm text-muted-foreground">
+              <li><a href="#sovereignty" className="hover:text-foreground transition-colors">Sovereignty</a></li>
+              <li><a href="#how-it-works" className="hover:text-foreground transition-colors">How It Works</a></li>
+              <li><a href="#use-cases" className="hover:text-foreground transition-colors">Use Cases</a></li>
+              <li><a href="#features" className="hover:text-foreground transition-colors">Features</a></li>
+              <li><a href="#api" className="hover:text-foreground transition-colors">API</a></li>
+            </ul>
           </div>
-          <div className="text-sm text-muted-foreground">
-            &copy; 2026 ForgeProof. Open Source.
+
+          <div>
+            <h4 className="font-semibold text-sm mb-3">Resources</h4>
+            <ul className="space-y-2 text-sm text-muted-foreground">
+              <li><Link href="/demo" className="hover:text-foreground transition-colors">Demo</Link></li>
+              <li><Link href="/verify" className="hover:text-foreground transition-colors">Verify</Link></li>
+              <li><Link href="/lookup" className="hover:text-foreground transition-colors">Lookup</Link></li>
+              <li><Link href="/sdk" className="hover:text-foreground transition-colors">SDK</Link></li>
+              <li><Link href="/analytics" className="hover:text-foreground transition-colors">Analytics</Link></li>
+            </ul>
+          </div>
+
+          <div>
+            <h4 className="font-semibold text-sm mb-3">Connect</h4>
+            <ul className="space-y-2 text-sm text-muted-foreground">
+              <li>
+                <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors flex items-center gap-1.5">
+                  <SiGithub className="w-3.5 h-3.5" />
+                  GitHub
+                </a>
+              </li>
+            </ul>
           </div>
         </div>
       </div>
@@ -844,6 +988,7 @@ function Footer() {
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-background">
+      <SEO title="ForgeProof - Code Provenance for the AI Era" description="Track AI-generated code provenance with cryptographic attestation. Ed25519 signatures, SHA-256 hash chains, geographic compliance verification." path="/" />
       <Navbar />
       <HeroSection />
       <StatsSection />
@@ -851,6 +996,7 @@ export default function LandingPage() {
       <TrustSection />
       <HowItWorksSection />
       <UseCasesSection />
+      <PlatformFeaturesSection />
       <ApiSection />
       <CTASection />
       <Footer />

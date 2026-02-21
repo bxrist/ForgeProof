@@ -24,6 +24,7 @@ import {
   CheckCircle2,
   FileText,
 } from "lucide-react";
+import { SEO } from "@/components/SEO";
 
 function DetailRow({ label, value, icon: Icon, mono = false }: { label: string; value: string; icon?: any; mono?: boolean }) {
   const { toast } = useToast();
@@ -135,6 +136,7 @@ export default function AttestationDetailPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      <SEO title="Attestation Receipt" description="View detailed cryptographic attestation receipt with signature verification." path={`/attestation/${params.id}`} />
       <header className="sticky top-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between gap-4 h-16">
@@ -229,14 +231,14 @@ export default function AttestationDetailPage() {
           <div className="divide-y divide-border">
             <DetailRow label="Created" value={receipt.createdAt ? new Date(receipt.createdAt).toLocaleString() : "Unknown"} icon={Clock} />
             <DetailRow label="Receipt Version" value={receipt.receiptVersion || "v1"} />
-            {receipt.metadata && (
+            {receipt.metadata ? (
               <div className="py-3">
                 <div className="text-sm text-muted-foreground mb-2">Additional Metadata</div>
                 <pre className="text-xs font-mono bg-muted/50 p-3 rounded-md overflow-x-auto">
                   {JSON.stringify(receipt.metadata as Record<string, unknown>, null, 2)}
                 </pre>
               </div>
-            )}
+            ) : null}
           </div>
         </Card>
       </main>
