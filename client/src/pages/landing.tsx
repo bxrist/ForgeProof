@@ -125,11 +125,9 @@ function Navbar() {
     <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between gap-4 h-16">
-          <Link href="/" className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center">
-              <ForgeProofLogo size={18} className="text-primary-foreground" />
-            </div>
-            <span className="font-display font-bold text-lg tracking-tight" data-testid="logo-text">ForgeProof</span>
+          <Link href="/" className="flex items-center gap-2">
+            <ForgeProofLogo size={44} />
+            <span className="font-display font-bold text-xl tracking-tight" data-testid="logo-text">ForgeProof</span>
           </Link>
 
           <div className="hidden md:flex items-center gap-1">
@@ -703,8 +701,8 @@ function CTASection() {
       <div className="absolute inset-0 bg-gradient-to-t from-primary/5 via-transparent to-transparent dark:from-primary/10" />
       <div className="relative max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
         <FadeIn>
-          <div className="w-16 h-16 rounded-2xl bg-primary/10 dark:bg-primary/20 flex items-center justify-center mx-auto mb-6">
-            <ForgeProofLogo size={32} className="text-primary" />
+          <div className="flex items-center justify-center mx-auto mb-8">
+            <ForgeProofLogo size={140} />
           </div>
           <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight mb-4">
             Start Building Trust in AI-Generated Code
@@ -737,10 +735,8 @@ function Footer() {
     <footer className="border-t border-border bg-card/50 py-12">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-md bg-primary flex items-center justify-center">
-              <ForgeProofLogo size={16} className="text-primary-foreground" />
-            </div>
+          <div className="flex items-center gap-2">
+            <ForgeProofLogo size={36} />
             <span className="font-display font-bold tracking-tight">ForgeProof</span>
           </div>
           <div className="flex items-center gap-6 text-sm text-muted-foreground">
