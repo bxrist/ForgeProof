@@ -8,8 +8,8 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import type { AttestationReceipt } from "@shared/schema";
+import { ForgeProofLogo } from "@/components/ForgeProofLogo";
 import {
-  Shield,
   ArrowLeft,
   Download,
   Copy,
@@ -18,6 +18,7 @@ import {
   Cpu,
   MapPin,
   Clock,
+  Building2,
   Fingerprint,
   Link2,
   CheckCircle2,
@@ -184,7 +185,7 @@ export default function AttestationDetailPage() {
               </div>
             </div>
             <div className="flex items-center gap-3 p-3 rounded-md bg-muted/50">
-              <Shield className="w-5 h-5 text-primary" />
+              <Building2 className="w-5 h-5 text-primary" />
               <div>
                 <div className="text-xs text-muted-foreground">Provider</div>
                 <div className="text-sm font-medium">{receipt.modelProvider}</div>

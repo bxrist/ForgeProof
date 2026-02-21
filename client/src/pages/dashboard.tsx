@@ -14,8 +14,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { AttestationReceipt, Repository, ApiKey } from "@shared/schema";
+import { ForgeProofLogo } from "@/components/ForgeProofLogo";
 import {
-  Shield,
   FileCheck,
   GitBranch,
   Key,
@@ -23,6 +23,7 @@ import {
   ArrowRight,
   Download,
   Clock,
+  Link2,
   Hash,
   Cpu,
   MapPin,
@@ -308,7 +309,7 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between gap-4 h-16">
             <Link href="/" className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center">
-                <Shield className="w-4.5 h-4.5 text-primary-foreground" />
+                <ForgeProofLogo size={18} className="text-primary-foreground" />
               </div>
               <span className="font-display font-bold text-lg tracking-tight">ForgeProof</span>
             </Link>
@@ -359,7 +360,7 @@ export default function DashboardPage() {
           <StatCard
             label="Chain Integrity"
             value="Verified"
-            icon={Shield}
+            icon={Link2}
             loading={false}
           />
         </div>

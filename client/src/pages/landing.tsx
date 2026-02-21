@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { useAuth } from "@/hooks/use-auth";
 import {
-  Shield,
   Globe,
   Lock,
   FileCheck,
@@ -28,9 +27,11 @@ import {
   Eye,
   Hash,
   Menu,
+  Link2,
   X,
 } from "lucide-react";
 import { SiGithub } from "react-icons/si";
+import { ForgeProofLogo } from "@/components/ForgeProofLogo";
 
 function FadeIn({ children, delay = 0, className = "" }: { children: React.ReactNode; delay?: number; className?: string }) {
   const ref = useRef(null);
@@ -126,7 +127,7 @@ function Navbar() {
         <div className="flex items-center justify-between gap-4 h-16">
           <Link href="/" className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center">
-              <Shield className="w-4.5 h-4.5 text-primary-foreground" />
+              <ForgeProofLogo size={18} className="text-primary-foreground" />
             </div>
             <span className="font-display font-bold text-lg tracking-tight" data-testid="logo-text">ForgeProof</span>
           </Link>
@@ -457,7 +458,7 @@ function TrustSection() {
           <div className="mt-16 grid sm:grid-cols-3 gap-6">
             {[
               {
-                icon: Shield,
+                icon: Link2,
                 title: "Tamper-Evident",
                 desc: "Hash-chained entries ensure any modification to the attestation ledger is immediately detectable.",
               },
@@ -583,7 +584,7 @@ function UseCasesSection() {
               desc: "Maintain transparency about which AI models contributed to your project. Build trust with contributors and users.",
             },
             {
-              icon: Shield,
+              icon: Fingerprint,
               title: "Security Auditing",
               desc: "Identify exactly which AI model produced each piece of code during security reviews and vulnerability assessments.",
             },
@@ -703,7 +704,7 @@ function CTASection() {
       <div className="relative max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
         <FadeIn>
           <div className="w-16 h-16 rounded-2xl bg-primary/10 dark:bg-primary/20 flex items-center justify-center mx-auto mb-6">
-            <Shield className="w-8 h-8 text-primary" />
+            <ForgeProofLogo size={32} className="text-primary" />
           </div>
           <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight mb-4">
             Start Building Trust in AI-Generated Code
@@ -738,7 +739,7 @@ function Footer() {
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-md bg-primary flex items-center justify-center">
-              <Shield className="w-4 h-4 text-primary-foreground" />
+              <ForgeProofLogo size={16} className="text-primary-foreground" />
             </div>
             <span className="font-display font-bold tracking-tight">ForgeProof</span>
           </div>
