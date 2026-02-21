@@ -138,6 +138,7 @@ function Navbar() {
             <a href="#how-it-works" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">How It Works</a>
             <a href="#use-cases" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">Use Cases</a>
             <a href="#api" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">API</a>
+            <Link href="/sdk" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">SDK</Link>
           </div>
 
           <div className="hidden md:flex items-center gap-3">
@@ -739,6 +740,12 @@ const { receipts } = await response.json();`,
                   <Button variant="outline" data-testid="button-api-verify">
                     <Link2 className="w-4 h-4 mr-2" />
                     Verify Chain
+                  </Button>
+                </Link>
+                <Link href="/sdk">
+                  <Button variant="outline" data-testid="button-api-sdk">
+                    <Code2 className="w-4 h-4 mr-2" />
+                    SDK Docs
                   </Button>
                 </Link>
               </div>

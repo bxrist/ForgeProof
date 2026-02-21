@@ -149,10 +149,16 @@ export default function AttestationDetailPage() {
                 <p className="text-xs text-muted-foreground">#{receipt.id}</p>
               </div>
             </div>
-            <Button variant="outline" size="sm" onClick={handleDownload} data-testid="button-download-receipt">
-              <Download className="w-3.5 h-3.5 mr-1.5" />
-              Download JSON
-            </Button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button variant="outline" size="sm" onClick={() => window.open(`/api/receipt/${receipt.id}/export`, '_blank')} data-testid="button-download-certificate">
+                <FileText className="w-3.5 h-3.5 mr-1.5" />
+                Certificate
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleDownload} data-testid="button-download-receipt">
+                <Download className="w-3.5 h-3.5 mr-1.5" />
+                Download JSON
+              </Button>
+            </div>
           </div>
         </div>
       </header>
@@ -227,7 +233,7 @@ export default function AttestationDetailPage() {
               <div className="py-3">
                 <div className="text-sm text-muted-foreground mb-2">Additional Metadata</div>
                 <pre className="text-xs font-mono bg-muted/50 p-3 rounded-md overflow-x-auto">
-                  {JSON.stringify(receipt.metadata, null, 2)}
+                  {JSON.stringify(receipt.metadata as Record<string, unknown>, null, 2)}
                 </pre>
               </div>
             )}

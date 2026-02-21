@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -16,6 +17,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { AttestationReceipt, Repository, ApiKey } from "@shared/schema";
 import { ForgeProofLogo } from "@/components/ForgeProofLogo";
 import { useTheme } from "@/components/ThemeProvider";
+import { OnboardingWalkthrough } from "@/components/OnboardingWalkthrough";
 import {
   FileCheck,
   GitBranch,
@@ -37,7 +39,12 @@ import {
   BarChart3,
   Trash2,
   ChevronRight,
+  Search,
+  Filter,
+  CheckCircle2,
+  Info,
 } from "lucide-react";
+import { SiGithub } from "react-icons/si";
 
 function StatCard({ label, value, icon: Icon, loading }: { label: string; value: string | number; icon: any; loading?: boolean }) {
   return (
@@ -256,6 +263,9 @@ export default function DashboardPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const { theme, toggleTheme } = useTheme();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [providerFilter, setProviderFilter] = useState("all");
+  const [complianceFilter, setComplianceFilter] = useState("all");
 
   const { data: receipts, isLoading: receiptsLoading } = useQuery<AttestationReceipt[]>({
     queryKey: ["/api/attestations"],
@@ -268,6 +278,32 @@ export default function DashboardPage() {
   const { data: keys, isLoading: keysLoading } = useQuery<ApiKey[]>({
     queryKey: ["/api/api-keys"],
   });
+
+  const { data: githubStatus } = useQuery<{ configured: boolean; connected: boolean }>({
+    queryKey: ["/api/github/status"],
+  });
+
+  const uniqueProviders = useMemo(() => {
+    if (!receipts) return [];
+    return Array.from(new Set(receipts.map((r) => r.modelProvider))).sort();
+  }, [receipts]);
+
+  const filteredReceipts = useMemo(() => {
+    if (!receipts) return [];
+    return receipts.filter((r) => {
+      const query = searchQuery.toLowerCase();
+      const matchesSearch =
+        !query ||
+        r.fileName.toLowerCase().includes(query) ||
+        r.filePath.toLowerCase().includes(query);
+      const matchesProvider =
+        providerFilter === "all" || r.modelProvider === providerFilter;
+      const matchesCompliance =
+        complianceFilter === "all" ||
+        (r.complianceStatus || "unverified").toLowerCase() === complianceFilter.toLowerCase();
+      return matchesSearch && matchesProvider && matchesCompliance;
+    });
+  }, [receipts, searchQuery, providerFilter, complianceFilter]);
 
   const deleteKeyMutation = useMutation({
     mutationFn: async (id: number) => {
@@ -308,6 +344,7 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      <OnboardingWalkthrough />
       <header className="sticky top-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between gap-4 h-16">
@@ -397,17 +434,59 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between gap-4 p-4 border-b border-border">
                 <h3 className="font-semibold text-sm">Attestation Receipts</h3>
                 <Badge variant="outline" className="text-xs">
-                  {receipts?.length ?? 0} total
+                  {filteredReceipts.length} of {receipts?.length ?? 0}
                 </Badge>
+              </div>
+              <div className="flex flex-wrap items-center gap-3 p-4 border-b border-border">
+                <div className="relative flex-1 min-w-[200px]">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by file name or path..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9"
+                    data-testid="input-dashboard-search"
+                  />
+                </div>
+                <Select value={providerFilter} onValueChange={setProviderFilter}>
+                  <SelectTrigger className="w-[180px]" data-testid="select-dashboard-provider">
+                    <Filter className="w-3.5 h-3.5 mr-1.5 text-muted-foreground" />
+                    <SelectValue placeholder="Provider" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Providers</SelectItem>
+                    {uniqueProviders.map((p) => (
+                      <SelectItem key={p} value={p}>{p}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={complianceFilter} onValueChange={setComplianceFilter}>
+                  <SelectTrigger className="w-[180px]" data-testid="select-dashboard-compliance">
+                    <Filter className="w-3.5 h-3.5 mr-1.5 text-muted-foreground" />
+                    <SelectValue placeholder="Compliance" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Statuses</SelectItem>
+                    <SelectItem value="verified">Verified</SelectItem>
+                    <SelectItem value="mismatch">Mismatch</SelectItem>
+                    <SelectItem value="unverified">Unverified</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               {receiptsLoading ? (
                 <LoadingRows />
-              ) : receipts && receipts.length > 0 ? (
+              ) : filteredReceipts.length > 0 ? (
                 <div className="divide-y divide-border">
-                  {receipts.map((r) => (
+                  {filteredReceipts.map((r) => (
                     <AttestationRow key={r.id} receipt={r} />
                   ))}
                 </div>
+              ) : receipts && receipts.length > 0 ? (
+                <EmptyState
+                  icon={Search}
+                  title="No matching attestations"
+                  desc="Try adjusting your search or filter criteria."
+                />
               ) : (
                 <EmptyState
                   icon={FileCheck}
@@ -419,6 +498,65 @@ export default function DashboardPage() {
           </TabsContent>
 
           <TabsContent value="repositories">
+            <Card className="mb-4">
+              <div className="flex items-center justify-between gap-4 p-4">
+                {githubStatus?.connected ? (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-md bg-green-500/10 dark:bg-green-500/20 flex items-center justify-center shrink-0">
+                        <CheckCircle2 className="w-4.5 h-4.5 text-green-600 dark:text-green-400" />
+                      </div>
+                      <div>
+                        <div className="font-medium text-sm">GitHub Connected</div>
+                        <div className="text-xs text-muted-foreground">Your GitHub account is linked</div>
+                      </div>
+                    </div>
+                  </>
+                ) : !githubStatus?.configured ? (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-md bg-muted flex items-center justify-center shrink-0">
+                        <Info className="w-4.5 h-4.5 text-muted-foreground" />
+                      </div>
+                      <div>
+                        <div className="font-medium text-sm">GitHub OAuth is not configured</div>
+                        <div className="text-xs text-muted-foreground">Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET to enable GitHub integration</div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-md bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                        <SiGithub className="w-4.5 h-4.5 text-primary" />
+                      </div>
+                      <div>
+                        <div className="font-medium text-sm">Connect your GitHub account</div>
+                        <div className="text-xs text-muted-foreground">Link GitHub to sync repositories and attest code</div>
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          const res = await fetch("/api/github/connect", { credentials: "include" });
+                          const data = await res.json();
+                          if (data.url) {
+                            window.location.href = data.url;
+                          }
+                        } catch {
+                          toast({ title: "Failed to initiate GitHub connection", variant: "destructive" });
+                        }
+                      }}
+                      data-testid="button-connect-github"
+                    >
+                      <SiGithub className="w-3.5 h-3.5 mr-1.5" />
+                      Connect GitHub
+                    </Button>
+                  </>
+                )}
+              </div>
+            </Card>
             <Card>
               <div className="flex items-center justify-between gap-4 p-4 border-b border-border">
                 <h3 className="font-semibold text-sm">Connected Repositories</h3>

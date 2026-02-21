@@ -1,9 +1,12 @@
+import { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { AttestationReceipt } from "@shared/schema";
 import { ForgeProofLogo } from "@/components/ForgeProofLogo";
 import {
@@ -16,10 +19,14 @@ import {
   ArrowLeft,
   Download,
   ExternalLink,
+  Search,
+  Filter,
+  BarChart3,
+  Moon,
+  Sun,
 } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { useTheme } from "@/components/ThemeProvider";
-import { Moon, Sun } from "lucide-react";
 
 function StatCard({ label, value, icon: Icon, loading }: { label: string; value: string | number; icon: any; loading?: boolean }) {
   return (
@@ -94,6 +101,33 @@ export default function DemoPage() {
   });
   const { theme, toggleTheme } = useTheme();
 
+  const [searchQuery, setSearchQuery] = useState("");
+  const [providerFilter, setProviderFilter] = useState("all");
+  const [complianceFilter, setComplianceFilter] = useState("all");
+
+  const uniqueProviders = useMemo(() => {
+    if (!receipts) return [];
+    const providers = new Set(receipts.map((r) => r.modelProvider).filter(Boolean));
+    return Array.from(providers).sort();
+  }, [receipts]);
+
+  const filteredReceipts = useMemo(() => {
+    if (!receipts) return [];
+    return receipts.filter((r) => {
+      const query = searchQuery.toLowerCase();
+      if (query && !(r.fileName?.toLowerCase().includes(query) || r.filePath?.toLowerCase().includes(query))) {
+        return false;
+      }
+      if (providerFilter !== "all" && r.modelProvider !== providerFilter) {
+        return false;
+      }
+      if (complianceFilter !== "all" && r.complianceStatus !== complianceFilter) {
+        return false;
+      }
+      return true;
+    });
+  }, [receipts, searchQuery, providerFilter, complianceFilter]);
+
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border">
@@ -120,18 +154,29 @@ export default function DemoPage() {
                   Verify
                 </Button>
               </Link>
+              <Link href="/lookup">
+                <Button variant="ghost" size="sm" data-testid="button-demo-lookup">
+                  <Search className="w-3.5 h-3.5 mr-1.5" />
+                  Lookup
+                </Button>
+              </Link>
+              <Link href="/analytics">
+                <Button variant="ghost" size="sm" data-testid="button-demo-analytics">
+                  <BarChart3 className="w-3.5 h-3.5 mr-1.5" />
+                  Analytics
+                </Button>
+              </Link>
+              <Link href="/sdk">
+                <Button variant="ghost" size="sm" data-testid="button-demo-sdk">
+                  SDK
+                </Button>
+              </Link>
               <Link href="/">
                 <Button variant="ghost" size="sm" data-testid="button-back-home">
                   <ArrowLeft className="w-3.5 h-3.5 mr-1.5" />
                   Home
                 </Button>
               </Link>
-              <a href="https://github.com" target="_blank" rel="noopener noreferrer">
-                <Button variant="outline" size="sm" data-testid="button-demo-github">
-                  <SiGithub className="w-3.5 h-3.5 mr-1.5" />
-                  GitHub
-                </Button>
-              </a>
             </div>
           </div>
         </div>
@@ -175,18 +220,58 @@ export default function DemoPage() {
           />
         </div>
 
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              data-testid="input-search"
+              placeholder="Search by file name or path..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <Filter className="w-4 h-4" />
+            </div>
+            <Select value={providerFilter} onValueChange={setProviderFilter}>
+              <SelectTrigger data-testid="select-provider-filter" className="w-[180px]">
+                <SelectValue placeholder="All Providers" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Providers</SelectItem>
+                {uniqueProviders.map((provider) => (
+                  <SelectItem key={provider} value={provider!}>{provider}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={complianceFilter} onValueChange={setComplianceFilter}>
+              <SelectTrigger data-testid="select-compliance-filter" className="w-[180px]">
+                <SelectValue placeholder="All Statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="verified">Verified</SelectItem>
+                <SelectItem value="mismatch">Mismatch</SelectItem>
+                <SelectItem value="unverified">Unverified</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
         <Card>
           <div className="flex items-center justify-between gap-4 p-4 border-b border-border">
             <h3 className="font-semibold text-sm">Self-Attesting Receipts</h3>
             <Badge variant="outline" className="text-xs">
-              {receipts?.length ?? 0} total
+              {filteredReceipts.length} of {receipts?.length ?? 0}
             </Badge>
           </div>
           {isLoading ? (
             <LoadingRows />
-          ) : receipts && receipts.length > 0 ? (
+          ) : filteredReceipts.length > 0 ? (
             <div className="divide-y divide-border">
-              {receipts.map((r) => (
+              {filteredReceipts.map((r) => (
                 <AttestationRow key={r.id} receipt={r} />
               ))}
             </div>
