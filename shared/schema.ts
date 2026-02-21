@@ -29,6 +29,8 @@ export const attestationReceipts = pgTable("attestation_receipts", {
   modelName: varchar("model_name").notNull(),
   modelProvider: varchar("model_provider").notNull(),
   countryOfOrigin: varchar("country_of_origin").notNull(),
+  detectedCountry: varchar("detected_country"),
+  complianceStatus: varchar("compliance_status").default("unverified"),
   signature: text("signature").notNull(),
   publicKey: text("public_key").notNull(),
   prevEntryHash: varchar("prev_entry_hash", { length: 128 }),

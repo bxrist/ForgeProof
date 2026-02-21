@@ -12,19 +12,24 @@ import {
 } from "@shared/schema";
 import type { User } from "@shared/models/auth";
 import { db } from "./db";
-import { eq, desc, and, or } from "drizzle-orm";
+import { eq, desc, and, or, asc } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
 
   getRepositories(userId: string): Promise<Repository[]>;
   getRepository(id: number): Promise<Repository | undefined>;
+  getRepositoryByGithubId(githubId: number, userId: string): Promise<Repository | undefined>;
   createRepository(repo: InsertRepository): Promise<Repository>;
+  updateRepository(id: number, data: Partial<InsertRepository>): Promise<void>;
+  updateRepositoryLastSynced(id: number): Promise<void>;
   deleteRepository(id: number): Promise<void>;
 
   getAttestations(userId: string): Promise<AttestationReceipt[]>;
   getSystemAttestations(): Promise<AttestationReceipt[]>;
+  getAllAttestationsOrdered(): Promise<AttestationReceipt[]>;
   getAttestation(id: number): Promise<AttestationReceipt | undefined>;
+  getAttestationByEntryHash(entryHash: string): Promise<AttestationReceipt | undefined>;
   getLatestAttestation(): Promise<AttestationReceipt | undefined>;
   createAttestation(receipt: InsertAttestationReceipt): Promise<AttestationReceipt>;
 
@@ -50,9 +55,24 @@ export class DatabaseStorage implements IStorage {
     return repo || undefined;
   }
 
+  async getRepositoryByGithubId(githubId: number, userId: string): Promise<Repository | undefined> {
+    const [repo] = await db.select().from(repositories).where(
+      and(eq(repositories.githubId, githubId), eq(repositories.userId, userId))
+    );
+    return repo || undefined;
+  }
+
   async createRepository(repo: InsertRepository): Promise<Repository> {
     const [created] = await db.insert(repositories).values(repo).returning();
     return created;
+  }
+
+  async updateRepository(id: number, data: Partial<InsertRepository>): Promise<void> {
+    await db.update(repositories).set(data).where(eq(repositories.id, id));
+  }
+
+  async updateRepositoryLastSynced(id: number): Promise<void> {
+    await db.update(repositories).set({ lastSyncedAt: new Date() }).where(eq(repositories.id, id));
   }
 
   async deleteRepository(id: number): Promise<void> {
@@ -71,8 +91,18 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(attestationReceipts.createdAt));
   }
 
+  async getAllAttestationsOrdered(): Promise<AttestationReceipt[]> {
+    return db.select().from(attestationReceipts)
+      .orderBy(asc(attestationReceipts.id));
+  }
+
   async getAttestation(id: number): Promise<AttestationReceipt | undefined> {
     const [receipt] = await db.select().from(attestationReceipts).where(eq(attestationReceipts.id, id));
+    return receipt || undefined;
+  }
+
+  async getAttestationByEntryHash(entryHash: string): Promise<AttestationReceipt | undefined> {
+    const [receipt] = await db.select().from(attestationReceipts).where(eq(attestationReceipts.entryHash, entryHash));
     return receipt || undefined;
   }
 

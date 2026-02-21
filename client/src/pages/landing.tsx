@@ -32,6 +32,8 @@ import {
 } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { ForgeProofLogo } from "@/components/ForgeProofLogo";
+import { useTheme } from "@/components/ThemeProvider";
+import { Moon, Sun } from "lucide-react";
 
 function FadeIn({ children, delay = 0, className = "" }: { children: React.ReactNode; delay?: number; className?: string }) {
   const ref = useRef(null);
@@ -119,6 +121,7 @@ function ReceiptPreview() {
 
 function Navbar() {
   const { user, isAuthenticated } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
@@ -138,6 +141,15 @@ function Navbar() {
           </div>
 
           <div className="hidden md:flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleTheme}
+              data-testid="button-theme-toggle"
+              className="w-8 h-8"
+            >
+              {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </Button>
             <a
               href="https://github.com"
               target="_blank"
@@ -612,9 +624,12 @@ function UseCasesSection() {
 }
 
 function ApiSection() {
-  const codeSnippet = `// AI Agent attestation via ForgeProof API
+  const [activeAgent, setActiveAgent] = useState<"openai" | "claude" | "replit">("openai");
+
+  const agentSnippets = {
+    openai: `// OpenAI Agent attestation
 const response = await fetch(
-  "https://forgeproof.app/api/v1/attest",
+  "/api/v1/agents/openai",
   {
     method: "POST",
     headers: {
@@ -622,18 +637,65 @@ const response = await fetch(
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      file_path: "src/utils/auth.ts",
-      file_hash: "sha256:a3f2e8c1...",
+      files: [{
+        file_path: "src/utils/auth.ts",
+        file_hash: "sha256:a3f2e8c1..."
+      }],
       model_name: "gpt-4-turbo",
       model_provider: "OpenAI",
       country_of_origin: "US",
-      repository: "acme/web-app"
+      session_id: "chatcmpl-abc123"
     })
   }
 );
+const { receipts } = await response.json();`,
+    claude: `// Claude Agent attestation
+const response = await fetch(
+  "/api/v1/agents/claude",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer fp_sk_...",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      files: [{
+        file_path: "src/server/api.ts",
+        file_hash: "sha256:7b9e4d2f..."
+      }],
+      model_name: "claude-sonnet-4-20250514",
+      model_provider: "Anthropic",
+      country_of_origin: "US",
+      session_id: "msg_01XFDUDYJg"
+    })
+  }
+);
+const { receipts } = await response.json();`,
+    replit: `// Replit Agent attestation
+const response = await fetch(
+  "/api/v1/agents/replit",
+  {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer fp_sk_...",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      files: [{
+        file_path: "src/index.tsx",
+        file_hash: "sha256:c4a8f1e3..."
+      }],
+      model_name: "replit-agent-v1",
+      model_provider: "Replit",
+      country_of_origin: "US",
+      session_id: "repl_session_xyz"
+    })
+  }
+);
+const { receipts } = await response.json();`,
+  };
 
-const receipt = await response.json();
-// => { id, signature, entry_hash, ... }`;
+  const agentLabels = { openai: "OpenAI", claude: "Claude", replit: "Replit" };
 
   return (
     <section id="api" className="py-20 sm:py-28">
@@ -649,14 +711,15 @@ const receipt = await response.json();
                 Built for AI Agents
               </h2>
               <p className="text-lg text-muted-foreground leading-relaxed">
-                A simple REST API that lets any AI agent programmatically attest the code it generates. OpenAI, Claude, and Replit Agent can all create signed attestation receipts in a single API call.
+                Dedicated endpoints for each AI agent platform. OpenAI, Claude, and Replit Agent each get a tailored API that handles batch attestation with a single call.
               </p>
               <ul className="space-y-3">
                 {[
-                  "Single endpoint for creating attestation receipts",
-                  "API key authentication with granular permissions",
-                  "Supports all major AI model providers",
-                  "Downloadable receipts in versioned JSON schema",
+                  "Dedicated endpoints: /api/v1/agents/openai, /claude, /replit",
+                  "Batch attest multiple files in a single request",
+                  "API key authentication with Bearer tokens",
+                  "Geographic compliance verification on every request",
+                  "Generic endpoint at /api/v1/attest for custom integrations",
                   "Self-attesting: ForgeProof attests its own codebase",
                 ].map((item) => (
                   <li key={item} className="flex items-start gap-2.5 text-sm">
@@ -672,6 +735,12 @@ const receipt = await response.json();
                     <ArrowRight className="w-4 h-4 ml-2" />
                   </Button>
                 </Link>
+                <Link href="/verify">
+                  <Button variant="outline" data-testid="button-api-verify">
+                    <Link2 className="w-4 h-4 mr-2" />
+                    Verify Chain
+                  </Button>
+                </Link>
               </div>
             </div>
           </FadeIn>
@@ -682,10 +751,21 @@ const receipt = await response.json();
                 <div className="w-3 h-3 rounded-full bg-[#ff5f57]" />
                 <div className="w-3 h-3 rounded-full bg-[#febc2e]" />
                 <div className="w-3 h-3 rounded-full bg-[#28c840]" />
-                <span className="ml-2 text-xs text-[#8b949e]">attest.ts</span>
+                <div className="flex items-center gap-1 ml-3">
+                  {(["openai", "claude", "replit"] as const).map((agent) => (
+                    <button
+                      key={agent}
+                      onClick={() => setActiveAgent(agent)}
+                      className={`px-2.5 py-1 text-xs rounded transition-colors ${activeAgent === agent ? "bg-[#30363d] text-[#e6edf3]" : "text-[#8b949e] hover:text-[#e6edf3]"}`}
+                      data-testid={`tab-agent-${agent}`}
+                    >
+                      {agentLabels[agent]}
+                    </button>
+                  ))}
+                </div>
               </div>
               <pre className="p-4 overflow-x-auto">
-                <code className="text-[#e6edf3]">{codeSnippet}</code>
+                <code className="text-[#e6edf3]">{agentSnippets[activeAgent]}</code>
               </pre>
             </div>
           </FadeIn>

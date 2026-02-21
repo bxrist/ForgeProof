@@ -18,6 +18,8 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { SiGithub } from "react-icons/si";
+import { useTheme } from "@/components/ThemeProvider";
+import { Moon, Sun } from "lucide-react";
 
 function StatCard({ label, value, icon: Icon, loading }: { label: string; value: string | number; icon: any; loading?: boolean }) {
   return (
@@ -90,6 +92,7 @@ export default function DemoPage() {
   const { data: receipts, isLoading } = useQuery<AttestationReceipt[]>({
     queryKey: ["/api/demo/attestations"],
   });
+  const { theme, toggleTheme } = useTheme();
 
   return (
     <div className="min-h-screen bg-background">
@@ -102,6 +105,21 @@ export default function DemoPage() {
             </Link>
 
             <div className="flex items-center gap-3">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleTheme}
+                data-testid="button-demo-theme-toggle"
+                className="w-8 h-8"
+              >
+                {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </Button>
+              <Link href="/verify">
+                <Button variant="ghost" size="sm" data-testid="button-demo-verify">
+                  <Link2 className="w-3.5 h-3.5 mr-1.5" />
+                  Verify
+                </Button>
+              </Link>
               <Link href="/">
                 <Button variant="ghost" size="sm" data-testid="button-back-home">
                   <ArrowLeft className="w-3.5 h-3.5 mr-1.5" />

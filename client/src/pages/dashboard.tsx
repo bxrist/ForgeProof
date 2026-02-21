@@ -15,6 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { AttestationReceipt, Repository, ApiKey } from "@shared/schema";
 import { ForgeProofLogo } from "@/components/ForgeProofLogo";
+import { useTheme } from "@/components/ThemeProvider";
 import {
   FileCheck,
   GitBranch,
@@ -28,6 +29,8 @@ import {
   Cpu,
   MapPin,
   ExternalLink,
+  Moon,
+  Sun,
   Copy,
   RefreshCw,
   LogOut,
@@ -252,6 +255,7 @@ export default function DashboardPage() {
   const { user, isLoading: authLoading, logout } = useAuth();
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const { theme, toggleTheme } = useTheme();
 
   const { data: receipts, isLoading: receiptsLoading } = useQuery<AttestationReceipt[]>({
     queryKey: ["/api/attestations"],
@@ -322,6 +326,15 @@ export default function DashboardPage() {
                 </Avatar>
                 <span className="text-sm font-medium">{user.firstName || user.email || "User"}</span>
               </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleTheme}
+                data-testid="button-dashboard-theme-toggle"
+                className="w-8 h-8"
+              >
+                {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </Button>
               <Button variant="ghost" size="icon" onClick={() => logout()} data-testid="button-logout">
                 <LogOut className="w-4 h-4" />
               </Button>
