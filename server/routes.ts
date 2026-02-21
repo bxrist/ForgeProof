@@ -105,6 +105,22 @@ export async function registerRoutes(
     res.json({ message: "Deleted" });
   });
 
+  app.get("/api/demo/attestations", async (_req, res) => {
+    const attestations = await storage.getSystemAttestations();
+    res.json(attestations);
+  });
+
+  app.get("/api/demo/attestations/:id", async (req, res) => {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+    const attestation = await storage.getAttestation(id);
+    if (!attestation) return res.status(404).json({ message: "Not found" });
+    if (attestation.userId !== "forgeproof-system") {
+      return res.status(403).json({ message: "Only system attestations are publicly accessible" });
+    }
+    res.json(attestation);
+  });
+
   app.post("/api/v1/attest", async (req, res) => {
     const authHeader = req.headers.authorization;
     let userId: string | null = null;

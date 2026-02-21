@@ -23,6 +23,7 @@ export interface IStorage {
   deleteRepository(id: number): Promise<void>;
 
   getAttestations(userId: string): Promise<AttestationReceipt[]>;
+  getSystemAttestations(): Promise<AttestationReceipt[]>;
   getAttestation(id: number): Promise<AttestationReceipt | undefined>;
   getLatestAttestation(): Promise<AttestationReceipt | undefined>;
   createAttestation(receipt: InsertAttestationReceipt): Promise<AttestationReceipt>;
@@ -61,6 +62,12 @@ export class DatabaseStorage implements IStorage {
   async getAttestations(userId: string): Promise<AttestationReceipt[]> {
     return db.select().from(attestationReceipts)
       .where(or(eq(attestationReceipts.userId, userId), eq(attestationReceipts.userId, "forgeproof-system")))
+      .orderBy(desc(attestationReceipts.createdAt));
+  }
+
+  async getSystemAttestations(): Promise<AttestationReceipt[]> {
+    return db.select().from(attestationReceipts)
+      .where(eq(attestationReceipts.userId, "forgeproof-system"))
       .orderBy(desc(attestationReceipts.createdAt));
   }
 

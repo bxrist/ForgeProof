@@ -7,8 +7,11 @@ ForgeProof is a GitHub-integrated code provenance attestation platform. It track
 
 ### Frontend (React + Vite)
 - **Landing Page** (`client/src/pages/landing.tsx`) - Informational website explaining model/data sovereignty, trust architecture, use cases, API integration
+- **Demo Page** (`client/src/pages/demo.tsx`) - Public read-only dashboard showing self-attesting seed data, no login required
+- **Demo Attestation Detail** (`client/src/pages/demo-attestation-detail.tsx`) - Public individual receipt view with JSON download
 - **Dashboard** (`client/src/pages/dashboard.tsx`) - Protected page showing attestation receipts, repositories, API keys
 - **Attestation Detail** (`client/src/pages/attestation-detail.tsx`) - Individual receipt view with download
+- **Custom Logo** (`client/src/components/ForgeProofLogo.tsx`) - Hammer-and-anvil SVG with hash/proof elements
 
 ### Backend (Express)
 - **Routes** (`server/routes.ts`) - API endpoints for attestations, repositories, API keys, plus public attestation API
@@ -45,6 +48,12 @@ ForgeProof is a GitHub-integrated code provenance attestation platform. It track
 - Complete informational landing page with all sections
 - Dashboard with tabs for attestations, repositories, API keys
 - Attestation detail page with JSON download
-- Ed25519 cryptographic signing
+- Ed25519 cryptographic signing with persisted keys in .keys/ directory
 - Seed data with 5 self-attesting receipts
 - Public attestation API at POST /api/v1/attest
+- Custom ForgeProof branding: hammer-and-anvil logo replacing shield icons
+- Public demo mode at /demo — shows all seed attestation data without requiring login
+- Public API endpoints: GET /api/demo/attestations and GET /api/demo/attestations/:id (system data only)
+- Landing page CTAs link to /demo instead of login flow
+- Authorization enforcement on attestation detail endpoint
+- Cryptographic API key generation using crypto.randomBytes

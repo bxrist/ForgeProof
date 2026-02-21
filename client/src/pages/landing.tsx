@@ -159,12 +159,12 @@ function Navbar() {
                 </Button>
               </Link>
             ) : (
-              <a href="/api/login">
+              <Link href="/demo">
                 <Button size="sm" data-testid="button-try-demo">
                   Try the Demo
                   <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
                 </Button>
-              </a>
+              </Link>
             )}
           </div>
 
@@ -201,9 +201,9 @@ function Navbar() {
                   <Button size="sm" className="w-full">Dashboard</Button>
                 </Link>
               ) : (
-                <a href="/api/login">
+                <Link href="/demo">
                   <Button size="sm" className="w-full">Try the Demo</Button>
-                </a>
+                </Link>
               )}
             </div>
           </motion.div>
@@ -244,12 +244,12 @@ function HeroSection() {
 
             <FadeIn delay={0.3}>
               <div className="flex flex-wrap items-center gap-3">
-                <a href="/api/login">
+                <Link href="/demo">
                   <Button size="lg" data-testid="button-hero-try-demo">
                     Try the Demo
                     <ArrowRight className="w-4 h-4 ml-2" />
                   </Button>
-                </a>
+                </Link>
                 <a href="https://github.com" target="_blank" rel="noopener noreferrer">
                   <Button variant="outline" size="lg" data-testid="button-hero-github">
                     <SiGithub className="w-4 h-4 mr-2" />
@@ -668,12 +668,12 @@ const receipt = await response.json();
                 ))}
               </ul>
               <div className="flex items-center gap-3 pt-2">
-                <a href="/api/login">
+                <Link href="/demo">
                   <Button data-testid="button-api-get-key">
-                    Get API Key
+                    View Demo
                     <ArrowRight className="w-4 h-4 ml-2" />
                   </Button>
-                </a>
+                </Link>
               </div>
             </div>
           </FadeIn>
@@ -713,12 +713,12 @@ function CTASection() {
             Join developers and organizations who are creating a verifiable record of their AI-assisted development workflow.
           </p>
           <div className="flex flex-wrap justify-center items-center gap-4">
-            <a href="/api/login">
+            <Link href="/demo">
               <Button size="lg" data-testid="button-cta-try-demo">
                 Try the Demo
                 <ArrowRight className="w-4 h-4 ml-2" />
               </Button>
-            </a>
+            </Link>
             <a href="https://github.com" target="_blank" rel="noopener noreferrer">
               <Button variant="outline" size="lg" data-testid="button-cta-github">
                 <SiGithub className="w-4 h-4 mr-2" />

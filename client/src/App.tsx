@@ -7,11 +7,15 @@ import NotFound from "@/pages/not-found";
 import LandingPage from "@/pages/landing";
 import DashboardPage from "@/pages/dashboard";
 import AttestationDetailPage from "@/pages/attestation-detail";
+import DemoPage from "@/pages/demo";
+import DemoAttestationDetailPage from "@/pages/demo-attestation-detail";
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={LandingPage} />
+      <Route path="/demo" component={DemoPage} />
+      <Route path="/demo/attestation/:id" component={DemoAttestationDetailPage} />
       <Route path="/dashboard" component={DashboardPage} />
       <Route path="/attestation/:id" component={AttestationDetailPage} />
       <Route component={NotFound} />
