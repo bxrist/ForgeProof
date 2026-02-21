@@ -1,0 +1,16 @@
+TO BUILD — AI Model Tie-Ins:
+
+MCP (Model Context Protocol) Server — Build a full MCP tool server so Claude, ChatGPT, and other MCP-compatible AI agents can automatically discover ForgeProof and call it to attest code they generate. No manual API calls needed — the AI just "knows" it can sign its work.
+OpenAI GPT Actions / Function Calling — Create an OpenAPI schema that packages ForgeProof as a custom GPT Action. ChatGPT Plus users would be able to say "attest this code" in their conversation and it would call our API behind the scenes.
+SDK / Integration Code Snippets — Build ready-to-use Python and TypeScript wrapper libraries for the attestation API. Developers drop these into their AI agent pipelines (OpenAI Assistants, Claude tool-use, LangChain, etc.) and attestation happens automatically.
+AI Provider Dashboard Widgets — Add analytics charts to the dashboard showing which AI models are generating the most attested code. Breakdowns by provider (OpenAI vs Anthropic vs Replit), model version, country, and compliance status.
+Attestation Badge Embeds — Generate embeddable SVG/HTML badges like "Verified by ForgeProof" showing which AI models contributed to a repo. Developers paste them into their README or website as proof of provenance.
+TO BUILD — Platform Features:
+
+GitHub OAuth Flow — Add a "Connect GitHub" button in the dashboard that runs the full OAuth flow so users can actually link their account and sync their repos through the UI.
+GitHub Webhook Listener — Register webhooks on connected repos so that when code is pushed, ForgeProof automatically creates attestation receipts without any manual API calls.
+Receipt PDF/Image Export — Generate a visually formatted attestation certificate (PDF or PNG) that users can download, share, or attach to compliance reports — not just raw JSON.
+Search and Filtering — Add a search bar plus filters for date range, model provider, compliance status, and repository to both the demo and dashboard attestation lists.
+Public Receipt Lookup — A standalone page where anyone can paste a receipt ID or entry hash and independently verify its signature, chain integrity, and compliance status.
+Rate Limiting — Add request throttling on the public API endpoints to prevent abuse and protect the signing infrastructure.
+Onboarding Walkthrough — A guided flow for new users that walks them through connecting GitHub, generating their first API key, and creating their first attestation receipt.
