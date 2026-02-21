@@ -332,9 +332,9 @@ export async function registerRoutes(
     const state = cryptoMod.randomBytes(16).toString("hex");
     oauthStates.set(state, Date.now());
     // Clean up old states (older than 10 minutes)
-    for (const [key, ts] of oauthStates) {
+    oauthStates.forEach((ts, key) => {
       if (Date.now() - ts > 600000) oauthStates.delete(key);
-    }
+    });
     const url = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${state}`;
     res.json({ url });
   });
