@@ -1,0 +1,231 @@
+Alright — here’s ForgeProof as a phased roadmap that starts with a clean Replit demo and ends with procurement-grade “model sovereignty → code sovereignty” enforcement.
+
+Phase 0 — Narrative + receipt format (1–2 days, parallelizable)
+
+Goal: Lock the “shape” of the system so later phases don’t break earlier receipts.
+
+Deliverables
+	•	Receipt v1 spec (JSON) with versioning:
+	•	receipt_version
+	•	artifact_type (text/file/zip/git-commit/container)
+	•	bundle_hash + optional file_hashes[]
+	•	signature + key_id + public_key
+	•	claims (model/provider/version, jurisdiction, policy tags, timestamps)
+	•	policy_evaluation (PASS/FAIL + reasons)
+	•	ledger (entry_id, entry_hash, prev_entry_hash, checkpoint_hash optional)
+	•	Threat model + what’s proven section (honest MVP language)
+	•	Minimal “policy profile” schema (allowlists, required jurisdictions, required attestation sources)
+
+Why it matters
+If receipts aren’t stable, the whole “lineage” story collapses later.
+
+⸻
+
+Phase 1 — Demo-complete MVP (Replit) ✅
+
+Goal: A working website that produces verifiable receipts for real multi-file code, with a tamper-evident ledger and evidence packs.
+
+Must-have features
+	•	Artifact ingestion
+	•	Paste code
+	•	Upload file
+	•	Upload zip project
+	•	Deterministic hashing
+	•	file_hashes[] sorted by path
+	•	bundle_hash = sha256(canonical_manifest_json)
+	•	Signing
+	•	Ed25519
+	•	system key generated on first run
+	•	key_id support
+	•	Ledger
+	•	SQLite
+	•	append-only entries
+	•	prev_entry_hash chaining
+	•	periodic checkpoint hash
+	•	Verification UX
+	•	Receipt + artifact verification
+	•	Ledger-only verification (clearly labeled as weaker)
+	•	Clear reason codes on failure
+	•	Policy Profiles
+	•	“US-only models” (enforces jurisdiction field + allowlist)
+	•	“Approved model list”
+	•	Lineage
+	•	optional parent_attestation_id
+	•	“lineage view” (simple chain / graph)
+	•	Evidence Pack export
+	•	zip: receipt.json + manifest.json + summary.md + policy.json
+	•	Verify-by-link
+	•	/verify/<entry_id> loads receipt and supports artifact upload
+
+Demo script works here: valid → tamper → invalid → chain → export evidence.
+
+⸻
+
+Phase 2 — Agent + CI integration (real workflow)
+
+Goal: Stop being a “site you visit” and become a thing your tooling uses.
+
+Deliverables
+	•	CLI tool (forgeproof)
+	•	forgeproof attest ./repo --policy us-only-models
+	•	forgeproof verify receipt.json ./repo
+	•	forgeproof export receipt.json --bundle
+	•	Git integration
+	•	attest a commit hash, tree hash, diff stats
+	•	store “commit attestation” in ledger
+	•	CI pipeline integration
+	•	GitHub Actions / GitLab CI / Jenkins:
+	•	run attest on build
+	•	attach evidence pack as artifact
+	•	optional “fail build if policy FAIL”
+	•	Agent integration
+	•	API endpoints for agents:
+	•	POST /api/attest supports agent identity token
+	•	POST /api/verify
+	•	“agent key” concept introduced (still software keys)
+
+Outcome
+ForgeProof becomes a build gate and an audit artifact generator, not a novelty.
+
+⸻
+
+Phase 3 — Identity hardening + key custody (credibility jump)
+
+Goal: Make signatures and identities defensible to third parties.
+
+Deliverables
+	•	Multi-tenant orgs/projects
+	•	org → projects → agents → keys
+	•	Key rotation + revocation with real semantics
+	•	receipts remain valid but “key revoked after date X” shows warning
+	•	Customer-managed keys
+	•	bring-your-own-key (BYOK)
+	•	KMS-backed signing (AWS KMS / GCP KMS / Azure Key Vault)
+	•	Transparency log behavior
+	•	stronger checkpointing
+	•	signed checkpoints (“log signed by log key”)
+	•	Role-based access control
+	•	who can create receipts, who can verify, who can revoke keys
+
+Outcome
+Now you can say “this signature is controlled by the org,” not “some demo server signed it.”
+
+⸻
+
+Phase 4 — Jurisdiction & execution attestation (the sovereignty proof)
+
+Goal: Replace “trust me bro, it was US-hosted” with evidence.
+
+Deliverables (choose based on environment)
+	•	Cloud region attestation
+	•	bind receipts to a provider-issued claim:
+	•	AWS Nitro Enclaves attestation docs
+	•	GCP Confidential Space / Shielded VM attestations
+	•	Azure Confidential Computing attestations
+	•	TEE-backed signing
+	•	signing key only usable inside an enclave in a specific region
+	•	receipt includes enclave measurement / attestation doc hash
+	•	Policy: “US-hosted generation required”
+	•	verification checks:
+	•	attestation doc valid
+	•	region claim = US
+	•	measurement matches approved workload
+	•	Time attestation
+	•	trusted timestamping (RFC 3161 TSA or provider time attest)
+
+Outcome
+This is where “US-only code generation” becomes enforceable in a procurement sense.
+
+⸻
+
+Phase 5 — Model-provider provenance (model identity stops being a field)
+
+Goal: Prove the model identity isn’t just user-supplied metadata.
+
+Deliverables
+	•	Provider-signed model identity
+	•	receipt contains a provider-signed token:
+	•	model name/version
+	•	endpoint identity
+	•	region
+	•	org account
+	•	Token binding
+	•	bind the provider token to the artifact hash so it can’t be replayed
+	•	Approved model registry
+	•	signed allowlist of models/endpoints
+	•	update + revocation feeds
+
+Outcome
+Now you can say “this came from that model endpoint,” not “we typed ‘American Model’ into a dropdown.”
+
+⸻
+
+Phase 6 — Supply chain standards compatibility (enterprise adoption)
+
+Goal: Make ForgeProof interoperable with how security teams already think.
+
+Deliverables
+	•	SLSA/in-toto style attestations
+	•	export receipts to standard provenance formats
+	•	SBOM integration
+	•	generate + sign SBOM (CycloneDX/SPDX)
+	•	link SBOM to build attestation
+	•	Container + artifact registry support
+	•	sign OCI images (cosign-style workflow)
+	•	verify in deployment pipeline
+	•	Policy-as-code
+	•	OPA/Rego policies for verification gates
+	•	“deploy only if ForgeProof attestation PASS”
+
+Outcome
+ForgeProof becomes part of the software supply chain, not adjacent to it.
+
+⸻
+
+Phase 7 — Audit + recall + legal-grade chain-of-custody
+
+Goal: The system supports investigations, recalls, and contractual disputes.
+
+Deliverables
+	•	Recall workflow
+	•	mark a receipt/artifact as recalled
+	•	propagate recall to descendants in lineage
+	•	Discovery/audit views
+	•	“show all code in project X generated under policy Y”
+	•	“show all code touched by model Z between dates”
+	•	Non-repudiation upgrades
+	•	stronger timestamping
+	•	independent log mirroring / witness servers
+	•	Evidence export formats
+	•	“audit packet” PDF + signed bundle for legal/compliance
+
+Outcome
+This is where “chain of custody” becomes operational, not rhetorical.
+
+⸻
+
+Phase 8 — Ecosystem / marketplace layer (optional but on-brand)
+
+Goal: Turn provenance into a network effect.
+
+Deliverables
+	•	Public verification endpoints
+	•	third-party verifiers can validate receipts
+	•	Witness network
+	•	multiple independent logs co-sign checkpoints
+	•	Registry of trusted agents/models
+	•	org-issued agent certs
+	•	provider-issued model certs
+	•	Integration partners
+	•	CI vendors, artifact registries, code hosts, compliance platforms
+
+Outcome
+ForgeProof becomes “the place provenance lives,” not just your internal control.
+
+⸻
+
+The honest mapping: what each phase “proves”
+	•	Phase 1 proves integrity + tamper evidence + usable receipts.
+	•	Phase 3 proves org-controlled signing + lifecycle governance.
+	•	Phase 4–5 prove sovereignty claims with actual evidence.
+	•	Phase 6–7 prove enterprise integration + audit defensibility.

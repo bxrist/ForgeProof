@@ -1,0 +1,39 @@
+Build a full-stack web app named “ForgeProof” in a single Replit project.
+
+Goal: Attest and verify code provenance by hashing code artifacts, signing the hash with Ed25519, and recording an append-only tamper-evident ledger entry in SQLite.
+
+Tech requirements:
+- Next.js (App Router) + TypeScript
+- Tailwind CSS for a clean, minimal, professional UI
+- SQLite for persistence
+- Implement SHA-256 hashing and Ed25519 signing on the server
+- Ledger must be tamper-evident: each entry stores prev_entry_hash and computes entry_hash as SHA-256 over a canonical JSON representation of the entry (excluding entry_hash)
+- Provide a downloadable “ForgeProof Receipt” JSON after attestation
+
+Pages:
+1) Home: explains what ForgeProof is and why code provenance matters (model sovereignty -> code sovereignty). Buttons to Create Attestation and Verify.
+2) Create Attestation: form allowing paste code or upload a file; fields for project, model provider/name/version, hosting jurisdiction, policy tags. On submit, call POST /api/attest and display digest, signature, public key (or key_id), ledger entry id/link. Provide copy and download receipt JSON.
+3) Verify: allow user to paste receipt JSON and provide artifact (paste/upload). On submit call POST /api/verify and show VALID/INVALID plus details.
+4) Ledger: list entries from GET /api/ledger
+5) Entry Detail: show full entry and chain context (prev hash and entry hash)
+
+API routes:
+- POST /api/attest (multipart for file upload + JSON metadata)
+- POST /api/verify
+- GET /api/ledger
+- GET /api/ledger/[id]
+
+Data model (SQLite):
+LedgerEntry: id, created_at, project, artifact_name, artifact_sha256, signature_ed25519, public_key_ed25519, claims_json, prev_entry_hash, entry_hash.
+
+MVP key management:
+- Generate one system Ed25519 keypair on first run and store it in the DB or local file (document this clearly). Use it to sign for now.
+- Include a key_id in receipts to support future multi-key support.
+
+Deliverables:
+- Working site with all pages
+- Clean UI
+- Attest -> receipt -> verify flow works end-to-end
+- Ledger is append-only; no deletion UI
+
+Also include a README explaining the threat model, what the MVP proves, and what future hardening would require (cloud region attestations, HSM/KMS, model-provider signed claims, revocation).
