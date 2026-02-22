@@ -49,6 +49,10 @@ const attestRequestSchema = z.object({
   repository: z.string().optional(),
   file_name: z.string().optional(),
   metadata: z.record(z.any()).optional(),
+  attestation_type: z.enum(["origin", "security_audit", "refactor", "review"]).optional().default("origin"),
+  parent_attestation_id: z.number().optional(),
+  audit_verdict: z.enum(["secure", "flagged", "remediated", "needs_review"]).optional(),
+  audit_details: z.string().optional(),
 });
 
 const agentAttestSchema = z.object({
@@ -104,7 +108,7 @@ async function authenticateApiKey(req: Request): Promise<string | null> {
 
 async function createAttestationReceipt(
   userId: string,
-  data: { file_path: string; file_hash: string; file_name?: string; model_name: string; model_provider: string; country_of_origin: string; metadata?: any },
+  data: { file_path: string; file_hash: string; file_name?: string; model_name: string; model_provider: string; country_of_origin: string; metadata?: any; attestation_type?: string; parent_attestation_id?: number; audit_verdict?: string; audit_details?: string },
   detectedCountry: string | null,
   repositoryId?: number
 ) {
@@ -138,6 +142,10 @@ async function createAttestationReceipt(
     countryOfOrigin: data.country_of_origin,
     detectedCountry,
     complianceStatus,
+    attestationType: data.attestation_type || "origin",
+    parentAttestationId: data.parent_attestation_id || null,
+    auditVerdict: data.audit_verdict || null,
+    auditDetails: data.audit_details || null,
     signature,
     publicKey,
     prevEntryHash,
@@ -190,7 +198,8 @@ export async function registerRoutes(
     if (attestation.userId !== userId && attestation.userId !== "forgeproof-system") {
       return res.status(403).json({ message: "Forbidden" });
     }
-    res.json(attestation);
+    const childAttestations = await storage.getAttestationsByParentId(id);
+    res.json({ ...attestation, childAttestations });
   });
 
   // ─── GitHub Repositories ──────────────────────────
@@ -650,7 +659,8 @@ export async function registerRoutes(
     if (attestation.userId !== "forgeproof-system") {
       return res.status(403).json({ message: "Only system attestations are publicly accessible" });
     }
-    res.json(attestation);
+    const childAttestations = await storage.getAttestationsByParentId(id);
+    res.json({ ...attestation, childAttestations });
   });
 
   // ─── Public Attestation API (generic) ─────────────
@@ -671,9 +681,67 @@ export async function registerRoutes(
       return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
     }
 
+    const data = parsed.data;
+    const attestationType = data.attestation_type || "origin";
+
+    if (attestationType !== "origin") {
+      if (!data.parent_attestation_id) {
+        return res.status(400).json({ message: "parentAttestationId is required for non-origin attestation types" });
+      }
+      const parentAttestation = await storage.getAttestation(data.parent_attestation_id);
+      if (!parentAttestation) {
+        return res.status(400).json({ message: "Parent attestation not found" });
+      }
+      if (attestationType === "security_audit" && parentAttestation.modelProvider === data.model_provider) {
+        return res.status(400).json({ message: "Security audit attestations must use a different model provider than the origin. The model that writes code cannot audit its own output." });
+      }
+    }
+
+    if (attestationType === "security_audit" && !data.audit_verdict) {
+      return res.status(400).json({ message: "auditVerdict is required for security_audit attestation type" });
+    }
+
     const detectedCountry = detectCountryFromRequest(req);
-    const receipt = await createAttestationReceipt(userId, parsed.data, detectedCountry);
+    const receipt = await createAttestationReceipt(userId, data, detectedCountry);
     res.status(201).json(receipt);
+  });
+
+  // ─── Attestation Chain ──────────────────────────────
+  app.get("/api/v1/attestation/:id/chain", async (req, res) => {
+    const id = parseInt(req.params.id as string);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+
+    const attestation = await storage.getAttestation(id);
+    if (!attestation) return res.status(404).json({ message: "Attestation not found" });
+
+    let root = attestation;
+    while (root.parentAttestationId) {
+      const parent = await storage.getAttestation(root.parentAttestationId);
+      if (!parent) break;
+      root = parent;
+    }
+
+    const chain: any[] = [root];
+    const visited = new Set([root.id]);
+    const queue = [root.id];
+
+    while (queue.length > 0) {
+      const currentId = queue.shift()!;
+      const children = await storage.getAttestationsByParentId(currentId);
+      for (const child of children) {
+        if (!visited.has(child.id)) {
+          visited.add(child.id);
+          chain.push(child);
+          queue.push(child.id);
+        }
+      }
+    }
+
+    res.json({
+      rootId: root.id,
+      attestations: chain,
+      chainLength: chain.length,
+    });
   });
 
   // ─── AI Agent Endpoints ───────────────────────────

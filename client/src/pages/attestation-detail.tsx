@@ -11,6 +11,7 @@ import type { AttestationReceipt } from "@shared/schema";
 import { ForgeProofLogo } from "@/components/ForgeProofLogo";
 import {
   ArrowLeft,
+  ArrowRight,
   Download,
   Copy,
   FileCheck,
@@ -23,8 +24,54 @@ import {
   Link2,
   CheckCircle2,
   FileText,
+  Info,
+  RefreshCw,
+  GitBranch,
 } from "lucide-react";
 import { SEO } from "@/components/SEO";
+
+type AttestationWithChildren = AttestationReceipt & {
+  childAttestations?: AttestationReceipt[];
+};
+
+function getTypeBadge(type: string | null | undefined) {
+  switch (type) {
+    case "security_audit":
+      return <Badge variant="secondary" className="text-xs bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 no-default-hover-elevate no-default-active-elevate" data-testid="badge-type-audit">Audit</Badge>;
+    case "refactor":
+      return <Badge variant="secondary" className="text-xs bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 no-default-hover-elevate no-default-active-elevate" data-testid="badge-type-refactor">Refactor</Badge>;
+    case "review":
+      return <Badge variant="secondary" className="text-xs bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400 no-default-hover-elevate no-default-active-elevate" data-testid="badge-type-review">Review</Badge>;
+    case "origin":
+    default:
+      return <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 no-default-hover-elevate no-default-active-elevate" data-testid="badge-type-origin">Origin</Badge>;
+  }
+}
+
+function getTypeLabel(type: string | null | undefined) {
+  switch (type) {
+    case "security_audit": return "Audit";
+    case "refactor": return "Refactor";
+    case "review": return "Review";
+    case "origin": default: return "Origin";
+  }
+}
+
+function getVerdictDisplay(verdict: string | null | undefined) {
+  if (!verdict) return null;
+  switch (verdict) {
+    case "secure":
+      return <span className="text-sm text-green-600 dark:text-green-400 font-medium" data-testid="text-verdict-secure"><CheckCircle2 className="w-3.5 h-3.5 inline mr-1" />Secure</span>;
+    case "flagged":
+      return <span className="text-sm text-red-600 dark:text-red-400 font-medium" data-testid="text-verdict-flagged"><Info className="w-3.5 h-3.5 inline mr-1" />Flagged</span>;
+    case "remediated":
+      return <span className="text-sm text-blue-600 dark:text-blue-400 font-medium" data-testid="text-verdict-remediated"><RefreshCw className="w-3.5 h-3.5 inline mr-1" />Remediated</span>;
+    case "needs_review":
+      return <span className="text-sm text-yellow-600 dark:text-yellow-400 font-medium" data-testid="text-verdict-needs-review"><Clock className="w-3.5 h-3.5 inline mr-1" />Needs Review</span>;
+    default:
+      return null;
+  }
+}
 
 function DetailRow({ label, value, icon: Icon, mono = false }: { label: string; value: string; icon?: any; mono?: boolean }) {
   const { toast } = useToast();
@@ -62,7 +109,7 @@ export default function AttestationDetailPage() {
   const { user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
 
-  const { data: receipt, isLoading } = useQuery<AttestationReceipt>({
+  const { data: receipt, isLoading } = useQuery<AttestationWithChildren>({
     queryKey: ["/api/attestations", params.id],
     enabled: !!params.id,
   });
@@ -240,6 +287,80 @@ export default function AttestationDetailPage() {
               </div>
             ) : null}
           </div>
+        </Card>
+
+        <Card className="p-6" data-testid="card-attestation-chain">
+          <h3 className="font-semibold text-sm mb-4 flex items-center gap-2">
+            <GitBranch className="w-4 h-4 text-primary" />
+            Attestation Chain
+          </h3>
+
+          {receipt.auditVerdict && (
+            <div className="flex items-center gap-3 p-3 rounded-md bg-muted/50 mb-4" data-testid="section-audit-verdict">
+              <div className="text-xs text-muted-foreground">Audit Verdict:</div>
+              {getVerdictDisplay(receipt.auditVerdict)}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 flex-wrap mb-4 p-3 rounded-md bg-muted/50 overflow-x-auto" data-testid="chain-diagram">
+            <div className="flex items-center gap-1 px-3 py-1.5 rounded-md border border-border bg-background shrink-0" data-testid="chain-node-current">
+              {getTypeBadge(receipt.attestationType)}
+              <span className="text-xs text-muted-foreground ml-1">{receipt.modelName}</span>
+            </div>
+            {receipt.childAttestations && receipt.childAttestations.length > 0 && receipt.childAttestations.map((child) => (
+              <div key={child.id} className="flex items-center gap-2 shrink-0">
+                <ArrowRight className="w-4 h-4 text-muted-foreground shrink-0" />
+                <Link href={`/attestation/${child.id}`}>
+                  <div className="flex items-center gap-1 px-3 py-1.5 rounded-md border border-border bg-background hover-elevate cursor-pointer" data-testid={`chain-node-child-${child.id}`}>
+                    {getTypeBadge(child.attestationType)}
+                    <span className="text-xs text-muted-foreground ml-1">{child.modelName}</span>
+                  </div>
+                </Link>
+              </div>
+            ))}
+          </div>
+
+          {receipt.parentAttestationId && (
+            <div className="mb-4" data-testid="section-parent-attestation">
+              <div className="text-sm text-muted-foreground mb-1">Parent Attestation</div>
+              <Link href={`/attestation/${receipt.parentAttestationId}`}>
+                <Button variant="outline" size="sm" data-testid="link-parent-attestation">
+                  <Link2 className="w-3.5 h-3.5 mr-1.5" />
+                  View Parent #{receipt.parentAttestationId}
+                </Button>
+              </Link>
+            </div>
+          )}
+
+          {receipt.childAttestations && receipt.childAttestations.length > 0 && (
+            <div data-testid="section-child-attestations">
+              <div className="text-sm text-muted-foreground mb-2">Child Attestations</div>
+              <div className="divide-y divide-border">
+                {receipt.childAttestations.map((child) => (
+                  <div key={child.id} className="flex items-center gap-3 py-3" data-testid={`row-child-attestation-${child.id}`}>
+                    {getTypeBadge(child.attestationType)}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">{child.fileName}</div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-muted-foreground">{child.modelProvider} / {child.modelName}</span>
+                        {getVerdictDisplay(child.auditVerdict)}
+                      </div>
+                    </div>
+                    <Link href={`/attestation/${child.id}`}>
+                      <Button variant="ghost" size="sm" data-testid={`link-child-attestation-${child.id}`}>
+                        View
+                        <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                      </Button>
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!receipt.parentAttestationId && (!receipt.childAttestations || receipt.childAttestations.length === 0) && (
+            <p className="text-sm text-muted-foreground" data-testid="text-no-chain">This is a standalone attestation with no linked chain.</p>
+          )}
         </Card>
       </main>
     </div>

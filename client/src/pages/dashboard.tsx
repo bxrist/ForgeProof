@@ -99,6 +99,36 @@ function StatCard({ label, value, icon: Icon, loading }: { label: string; value:
   );
 }
 
+function getAttestationTypeBadge(type: string | null | undefined) {
+  switch (type) {
+    case "security_audit":
+      return <Badge variant="secondary" className="text-xs bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 no-default-hover-elevate no-default-active-elevate" data-testid="badge-type-audit">Audit</Badge>;
+    case "refactor":
+      return <Badge variant="secondary" className="text-xs bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 no-default-hover-elevate no-default-active-elevate" data-testid="badge-type-refactor">Refactor</Badge>;
+    case "review":
+      return <Badge variant="secondary" className="text-xs bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400 no-default-hover-elevate no-default-active-elevate" data-testid="badge-type-review">Review</Badge>;
+    case "origin":
+    default:
+      return <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 no-default-hover-elevate no-default-active-elevate" data-testid="badge-type-origin">Origin</Badge>;
+  }
+}
+
+function getAuditVerdictDisplay(verdict: string | null | undefined) {
+  if (!verdict) return null;
+  switch (verdict) {
+    case "secure":
+      return <span className="text-xs text-green-600 dark:text-green-400 font-medium" data-testid="text-verdict-secure"><CheckCircle2 className="w-3 h-3 inline mr-0.5" /> Secure</span>;
+    case "flagged":
+      return <span className="text-xs text-red-600 dark:text-red-400 font-medium" data-testid="text-verdict-flagged"><Info className="w-3 h-3 inline mr-0.5" /> Flagged</span>;
+    case "remediated":
+      return <span className="text-xs text-blue-600 dark:text-blue-400 font-medium" data-testid="text-verdict-remediated"><RefreshCw className="w-3 h-3 inline mr-0.5" /> Remediated</span>;
+    case "needs_review":
+      return <span className="text-xs text-yellow-600 dark:text-yellow-400 font-medium" data-testid="text-verdict-needs-review"><Clock className="w-3 h-3 inline mr-0.5" /> Needs Review</span>;
+    default:
+      return null;
+  }
+}
+
 function AttestationRow({ receipt }: { receipt: AttestationReceipt }) {
   const [, navigate] = useLocation();
   return (
@@ -111,8 +141,17 @@ function AttestationRow({ receipt }: { receipt: AttestationReceipt }) {
         <FileCheck className="w-4.5 h-4.5 text-primary" />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="font-medium text-sm truncate">{receipt.fileName}</div>
-        <div className="text-xs text-muted-foreground truncate">{receipt.filePath}</div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-medium text-sm truncate">{receipt.fileName}</span>
+          {getAttestationTypeBadge(receipt.attestationType)}
+          {receipt.parentAttestationId && (
+            <Link2 className="w-3 h-3 text-muted-foreground shrink-0" data-testid={`icon-parent-link-${receipt.id}`} />
+          )}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-muted-foreground truncate">{receipt.filePath}</span>
+          {getAuditVerdictDisplay(receipt.auditVerdict)}
+        </div>
       </div>
       <div className="hidden sm:flex items-center gap-2">
         <Badge variant="secondary" className="text-xs">

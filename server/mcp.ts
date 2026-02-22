@@ -15,6 +15,7 @@ export const mcpToolDefinitions = [
         country_of_origin: { type: "string", description: "Country where the code was generated" },
         repository: { type: "string", description: "Optional repository identifier" },
         metadata: { type: "object", description: "Optional additional metadata" },
+        attestation_type: { type: "string", description: "Type of attestation (defaults to 'origin')" },
       },
       required: ["file_path", "file_hash", "model_name", "model_provider", "country_of_origin"],
     },
@@ -37,6 +38,45 @@ export const mcpToolDefinitions = [
       type: "object",
       properties: {},
       required: [],
+    },
+  },
+  {
+    name: "forgeproof_audit_attest",
+    description: "Create a security audit attestation for code that was previously attested by a different AI model. The auditing model must be different from the model that originally wrote the code. This enforces separation of concerns: the model that writes code cannot audit its own output.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        parentAttestationId: {
+          type: "number",
+          description: "The ID of the original attestation receipt to audit",
+        },
+        modelName: {
+          type: "string",
+          description: "Name of the auditing AI model (e.g., claude-3.5-sonnet)",
+        },
+        modelProvider: {
+          type: "string",
+          description: "Provider of the auditing AI model (e.g., Anthropic). Must be different from the original attestation's provider.",
+        },
+        auditVerdict: {
+          type: "string",
+          enum: ["secure", "flagged", "remediated", "needs_review"],
+          description: "The security verdict of the audit",
+        },
+        auditDetails: {
+          type: "string",
+          description: "Detailed findings from the security audit",
+        },
+        countryOfOrigin: {
+          type: "string",
+          description: "ISO country code where the audit was performed",
+        },
+        fileHash: {
+          type: "string",
+          description: "SHA-256 hash of the file after audit (same as original if no changes, new hash if remediated)",
+        },
+      },
+      required: ["parentAttestationId", "modelName", "modelProvider", "auditVerdict", "countryOfOrigin"],
     },
   },
   {
@@ -78,6 +118,7 @@ async function createMcpAttestation(
     model_provider: string;
     country_of_origin: string;
     metadata?: any;
+    attestation_type?: string;
   }
 ) {
   const fileName = data.file_name || data.file_path.split("/").pop() || "unknown";
@@ -115,10 +156,12 @@ async function createMcpAttestation(
     entryHash,
     receiptVersion: "v1",
     metadata: data.metadata || null,
+    attestationType: data.attestation_type || "origin",
   });
 }
 
 async function handleAttest(args: any, userId: string) {
+  const attestationType = args.attestation_type || "origin";
   const receipt = await createMcpAttestation(userId, {
     file_path: args.file_path,
     file_hash: args.file_hash,
@@ -127,6 +170,7 @@ async function handleAttest(args: any, userId: string) {
     country_of_origin: args.country_of_origin,
     file_name: args.file_path.split("/").pop() || "unknown",
     metadata: { ...args.metadata, source: "mcp", repository: args.repository },
+    attestation_type: attestationType,
   });
 
   return {
@@ -137,6 +181,77 @@ async function handleAttest(args: any, userId: string) {
     signature: receipt.signature,
     public_key: receipt.publicKey,
     prev_entry_hash: receipt.prevEntryHash,
+    attestation_type: attestationType,
+    created_at: receipt.createdAt,
+  };
+}
+
+async function handleAuditAttest(args: any, userId: string) {
+  const parent = await storage.getAttestation(args.parentAttestationId);
+  if (!parent) {
+    return { error: "Parent attestation not found" };
+  }
+
+  if (args.modelProvider === parent.modelProvider) {
+    return { error: "Security audit must use a different model provider than the origin" };
+  }
+
+  const fileHash = args.fileHash || parent.fileHash;
+  const fileName = parent.fileName;
+  const filePath = parent.filePath;
+  const timestamp = new Date().toISOString();
+  const latest = await storage.getLatestAttestation();
+  const prevEntryHash = latest?.entryHash || null;
+
+  const entryHash = computeEntryHash({
+    fileHash,
+    modelName: args.modelName,
+    modelProvider: args.modelProvider,
+    countryOfOrigin: args.countryOfOrigin,
+    prevEntryHash,
+    timestamp,
+  });
+
+  const signaturePayload = `${entryHash}|${fileHash}|${timestamp}`;
+  const signature = signData(signaturePayload);
+  const { publicKey } = getKeyPair();
+
+  const receipt = await storage.createAttestation({
+    userId,
+    repositoryId: null,
+    fileHash,
+    fileName,
+    filePath,
+    modelName: args.modelName,
+    modelProvider: args.modelProvider,
+    countryOfOrigin: args.countryOfOrigin,
+    detectedCountry: null,
+    complianceStatus: "unverified",
+    signature,
+    publicKey,
+    prevEntryHash,
+    entryHash,
+    receiptVersion: "v1",
+    metadata: { source: "mcp_audit" },
+    attestationType: "security_audit",
+    parentAttestationId: args.parentAttestationId,
+    auditVerdict: args.auditVerdict,
+    auditDetails: args.auditDetails || null,
+  });
+
+  return {
+    receipt_id: receipt.id,
+    entry_hash: receipt.entryHash,
+    file_path: receipt.filePath,
+    file_hash: receipt.fileHash,
+    file_name: receipt.fileName,
+    signature: receipt.signature,
+    public_key: receipt.publicKey,
+    prev_entry_hash: receipt.prevEntryHash,
+    attestation_type: "security_audit",
+    parent_attestation_id: args.parentAttestationId,
+    audit_verdict: args.auditVerdict,
+    audit_details: args.auditDetails || null,
     created_at: receipt.createdAt,
   };
 }
@@ -262,6 +377,8 @@ export async function handleMcpTool(toolName: string, args: any, userId: string)
       return handleLookup(args);
     case "forgeproof_verify_chain":
       return handleVerifyChain();
+    case "forgeproof_audit_attest":
+      return handleAuditAttest(args, userId);
     case "forgeproof_batch_attest":
       return handleBatchAttest(args, userId);
     default:

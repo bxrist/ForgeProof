@@ -40,6 +40,7 @@ export interface IStorage {
   getAllAttestationsOrdered(): Promise<AttestationReceipt[]>;
   getAttestation(id: number): Promise<AttestationReceipt | undefined>;
   getAttestationByEntryHash(entryHash: string): Promise<AttestationReceipt | undefined>;
+  getAttestationsByParentId(parentId: number): Promise<AttestationReceipt[]>;
   getLatestAttestation(): Promise<AttestationReceipt | undefined>;
   createAttestation(receipt: InsertAttestationReceipt): Promise<AttestationReceipt>;
 
@@ -130,6 +131,12 @@ export class DatabaseStorage implements IStorage {
   async getAttestation(id: number): Promise<AttestationReceipt | undefined> {
     const [receipt] = await db.select().from(attestationReceipts).where(eq(attestationReceipts.id, id));
     return receipt || undefined;
+  }
+
+  async getAttestationsByParentId(parentId: number): Promise<AttestationReceipt[]> {
+    return db.select().from(attestationReceipts)
+      .where(eq(attestationReceipts.parentAttestationId, parentId))
+      .orderBy(asc(attestationReceipts.id));
   }
 
   async getAttestationByEntryHash(entryHash: string): Promise<AttestationReceipt | undefined> {

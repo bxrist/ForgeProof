@@ -15,6 +15,9 @@ import {
   Copy,
   CheckCircle2,
   ExternalLink,
+  Shield,
+  Layers,
+  Bot,
 } from "lucide-react";
 
 const pythonCode = `import requests
@@ -194,6 +197,113 @@ curl "https://your-forgeproof.replit.app/api/openapi.json"`;
 
 const badgeMarkdown = `![ForgeProof](https://your-forgeproof.replit.app/api/badge/1.svg)`;
 
+const multiModelPythonCode = `import requests
+
+# Step 1: Create origin attestation (code was written by GPT-4)
+origin = requests.post(
+    "https://your-app.replit.app/api/v1/attest",
+    headers={"Authorization": "Bearer fp_your_api_key"},
+    json={
+        "file_hash": "sha256:a3f2e8d1...",
+        "file_name": "auth.py",
+        "file_path": "src/auth.py",
+        "model_name": "gpt-4-turbo",
+        "model_provider": "OpenAI",
+        "country_of_origin": "US",
+        "attestation_type": "origin"
+    }
+)
+origin_id = origin.json()["id"]
+
+# Step 2: Security audit by a DIFFERENT provider
+audit = requests.post(
+    "https://your-app.replit.app/api/v1/attest",
+    headers={"Authorization": "Bearer fp_your_api_key"},
+    json={
+        "file_hash": "sha256:a3f2e8d1...",
+        "file_name": "auth.py",
+        "file_path": "src/auth.py",
+        "model_name": "claude-3.5-sonnet",
+        "model_provider": "Anthropic",
+        "country_of_origin": "US",
+        "attestation_type": "security_audit",
+        "parent_attestation_id": origin_id,
+        "audit_verdict": "secure",
+        "audit_details": "No vulnerabilities detected."
+    }
+)`;
+
+const multiModelTsCode = `// Step 1: Origin attestation
+const origin = await fetch("/api/v1/attest", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer fp_your_api_key",
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    file_hash: "sha256:a3f2e8d1...",
+    file_name: "auth.ts",
+    file_path: "src/auth.ts",
+    model_name: "gpt-4-turbo",
+    model_provider: "OpenAI",
+    country_of_origin: "US",
+    attestation_type: "origin"
+  })
+});
+const { id: originId } = await origin.json();
+
+// Step 2: Security audit by different provider
+const audit = await fetch("/api/v1/attest", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer fp_your_api_key",
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    file_hash: "sha256:a3f2e8d1...",
+    file_name: "auth.ts",
+    file_path: "src/auth.ts",
+    model_name: "claude-3.5-sonnet",
+    model_provider: "Anthropic",
+    country_of_origin: "US",
+    attestation_type: "security_audit",
+    parent_attestation_id: originId,
+    audit_verdict: "secure",
+    audit_details: "No vulnerabilities detected."
+  })
+});`;
+
+const multiModelCurlCode = `# Create security audit attestation
+curl -X POST https://your-app.replit.app/api/v1/attest \\
+  -H "Authorization: Bearer fp_your_api_key" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "file_hash": "sha256:a3f2e8d1...",
+    "file_name": "auth.py",
+    "file_path": "src/auth.py",
+    "model_name": "claude-3.5-sonnet",
+    "model_provider": "Anthropic",
+    "country_of_origin": "US",
+    "attestation_type": "security_audit",
+    "parent_attestation_id": 42,
+    "audit_verdict": "secure",
+    "audit_details": "No vulnerabilities detected."
+  }'`;
+
+const multiModelWorkflow = `Step 1: Origin Attestation (GPT-4 writes code)
+Step 2: Security Audit (Claude reviews code, different provider)
+Step 3: Remediation (if issues found, Claude fixes and re-attests)`;
+
+const mcpAuditToolCode = `Tool: forgeproof_audit_attest
+Input: {
+  "parentAttestationId": 42,
+  "modelName": "claude-3.5-sonnet",
+  "modelProvider": "Anthropic",
+  "auditVerdict": "secure",
+  "countryOfOrigin": "US",
+  "auditDetails": "No vulnerabilities found."
+}`;
+
 type Tab = "python" | "typescript" | "curl";
 
 function CodeBlock({ code, label }: { code: string; label: string }) {
@@ -242,6 +352,7 @@ function CodeBlock({ code, label }: { code: string; label: string }) {
 export default function SdkPage() {
   const { theme, toggleTheme } = useTheme();
   const [activeTab, setActiveTab] = useState<Tab>("python");
+  const [multiModelTab, setMultiModelTab] = useState<Tab>("python");
 
   const tabs: { id: Tab; label: string; icon: typeof Terminal }[] = [
     { id: "python", label: "Python", icon: Code2 },
@@ -253,6 +364,12 @@ export default function SdkPage() {
     python: { code: pythonCode, label: "forgeproof_client.py" },
     typescript: { code: typescriptCode, label: "forgeproof-client.ts" },
     curl: { code: curlCode, label: "terminal" },
+  };
+
+  const multiModelCodeMap: Record<Tab, { code: string; label: string }> = {
+    python: { code: multiModelPythonCode, label: "multi_model_audit.py" },
+    typescript: { code: multiModelTsCode, label: "multi-model-audit.ts" },
+    curl: { code: multiModelCurlCode, label: "terminal" },
   };
 
   return (
@@ -398,6 +515,152 @@ export default function SdkPage() {
                 </p>
                 <p className="text-sm text-muted-foreground mb-3">Add this to your Markdown:</p>
                 <CodeBlock code={badgeMarkdown} label="README.md" />
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        <div className="mt-16 mb-12 text-center" data-testid="section-multi-model-attestation">
+          <Badge variant="outline" className="mb-4">
+            <Shield className="w-3 h-3 mr-1" />
+            Multi-Model
+          </Badge>
+          <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight mb-3" data-testid="heading-multi-model">
+            Multi-Model Attestation
+          </h2>
+          <p className="text-base text-muted-foreground max-w-2xl mx-auto">
+            ForgeProof supports multi-model attestation chains where the model that writes code is separate from the model that audits it for security. This enforces separation of concerns in AI-generated code.
+          </p>
+        </div>
+
+        <div className="space-y-8">
+          <Card className="p-6 sm:p-8" data-testid="card-workflow-diagram">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-md bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                <Layers className="w-5 h-5 text-primary" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="font-display text-lg font-semibold mb-2" data-testid="heading-workflow">Attestation Workflow</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                  A typical multi-model attestation chain follows these steps, ensuring that code generation and security review are performed by independent models from different providers.
+                </p>
+                <CodeBlock code={multiModelWorkflow} label="workflow" />
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-6 sm:p-8" data-testid="card-multi-model-examples">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-md bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                <Code2 className="w-5 h-5 text-primary" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="font-display text-lg font-semibold mb-2" data-testid="heading-multi-model-code">Code Examples</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                  Create an origin attestation first, then submit a security audit attestation referencing the original via <code className="text-xs bg-muted px-1.5 py-0.5 rounded">parent_attestation_id</code>.
+                </p>
+                <div className="mb-4">
+                  <div className="flex items-center gap-1 border-b border-border mb-4">
+                    {tabs.map((tab) => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setMultiModelTab(tab.id)}
+                        className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                          multiModelTab === tab.id
+                            ? "border-primary text-foreground"
+                            : "border-transparent text-muted-foreground hover:text-foreground"
+                        }`}
+                        data-testid={`tab-multi-model-${tab.id}`}
+                      >
+                        <tab.icon className="w-4 h-4" />
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                  <CodeBlock
+                    code={multiModelCodeMap[multiModelTab].code}
+                    label={multiModelCodeMap[multiModelTab].label}
+                  />
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-6 sm:p-8" data-testid="card-attestation-types">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-md bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                <Shield className="w-5 h-5 text-primary" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="font-display text-lg font-semibold mb-2" data-testid="heading-attestation-types">Attestation Types</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                  Every attestation must specify a type that describes its role in the chain.
+                </p>
+                <div className="space-y-3">
+                  <div className="flex items-start gap-3 text-sm">
+                    <code className="text-xs bg-muted px-1.5 py-0.5 rounded shrink-0 mt-0.5">origin</code>
+                    <span className="text-muted-foreground">Initial code generation attestation</span>
+                  </div>
+                  <div className="flex items-start gap-3 text-sm">
+                    <code className="text-xs bg-muted px-1.5 py-0.5 rounded shrink-0 mt-0.5">security_audit</code>
+                    <span className="text-muted-foreground">Security review by a different model (requires different provider)</span>
+                  </div>
+                  <div className="flex items-start gap-3 text-sm">
+                    <code className="text-xs bg-muted px-1.5 py-0.5 rounded shrink-0 mt-0.5">refactor</code>
+                    <span className="text-muted-foreground">Code refactoring attestation</span>
+                  </div>
+                  <div className="flex items-start gap-3 text-sm">
+                    <code className="text-xs bg-muted px-1.5 py-0.5 rounded shrink-0 mt-0.5">review</code>
+                    <span className="text-muted-foreground">General code review attestation</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-6 sm:p-8" data-testid="card-audit-verdicts">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-md bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-5 h-5 text-primary" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="font-display text-lg font-semibold mb-2" data-testid="heading-audit-verdicts">Audit Verdicts</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                  When creating a <code className="text-xs bg-muted px-1.5 py-0.5 rounded">security_audit</code> attestation, include an <code className="text-xs bg-muted px-1.5 py-0.5 rounded">audit_verdict</code> field with one of the following values.
+                </p>
+                <div className="space-y-3">
+                  <div className="flex items-start gap-3 text-sm">
+                    <code className="text-xs bg-muted px-1.5 py-0.5 rounded shrink-0 mt-0.5">secure</code>
+                    <span className="text-muted-foreground">Code passed security audit</span>
+                  </div>
+                  <div className="flex items-start gap-3 text-sm">
+                    <code className="text-xs bg-muted px-1.5 py-0.5 rounded shrink-0 mt-0.5">flagged</code>
+                    <span className="text-muted-foreground">Security issues found</span>
+                  </div>
+                  <div className="flex items-start gap-3 text-sm">
+                    <code className="text-xs bg-muted px-1.5 py-0.5 rounded shrink-0 mt-0.5">remediated</code>
+                    <span className="text-muted-foreground">Issues were found and fixed</span>
+                  </div>
+                  <div className="flex items-start gap-3 text-sm">
+                    <code className="text-xs bg-muted px-1.5 py-0.5 rounded shrink-0 mt-0.5">needs_review</code>
+                    <span className="text-muted-foreground">Requires further human review</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-6 sm:p-8" data-testid="card-mcp-audit-tool">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-md bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                <Bot className="w-5 h-5 text-primary" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="font-display text-lg font-semibold mb-2" data-testid="heading-mcp-audit-tool">MCP Audit Tool</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                  AI agents using the MCP integration can submit audit attestations directly via the <code className="text-xs bg-muted px-1.5 py-0.5 rounded">forgeproof_audit_attest</code> tool.
+                </p>
+                <CodeBlock code={mcpAuditToolCode} label="mcp-tool" />
               </div>
             </div>
           </Card>

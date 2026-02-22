@@ -29,6 +29,7 @@ import {
   Menu,
   Link2,
   X,
+  Shield,
 } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { ForgeProofLogo } from "@/components/ForgeProofLogo";
@@ -138,6 +139,7 @@ function Navbar() {
             <a href="#sovereignty" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">Sovereignty</a>
             <a href="#how-it-works" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">How It Works</a>
             <a href="#use-cases" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">Use Cases</a>
+            <a href="#multi-model" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">Multi-Model</a>
             <a href="#features" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">Features</a>
             <a href="#api" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">API</a>
             <Link href="/sdk" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">SDK</Link>
@@ -201,6 +203,7 @@ function Navbar() {
             <a href="#sovereignty" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>Sovereignty</a>
             <a href="#how-it-works" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>How It Works</a>
             <a href="#use-cases" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>Use Cases</a>
+            <a href="#multi-model" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>Multi-Model</a>
             <a href="#features" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>Features</a>
             <a href="#api" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>API</a>
             <Link href="/sdk" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>SDK</Link>
@@ -635,8 +638,137 @@ function UseCasesSection() {
   );
 }
 
+function MultiModelSection() {
+  const flowSteps = [
+    {
+      label: "Origin",
+      icon: Terminal,
+      provider: "OpenAI GPT-4",
+      text: "Writes the code",
+      accentClass: "border-blue-500/40 dark:border-blue-400/40",
+      iconBgClass: "bg-blue-500/10 dark:bg-blue-400/20",
+      iconColorClass: "text-blue-500 dark:text-blue-400",
+      badgeVariant: "secondary" as const,
+    },
+    {
+      label: "Security Audit",
+      icon: Shield,
+      provider: "Anthropic Claude",
+      text: "Reviews for vulnerabilities",
+      accentClass: "border-green-500/40 dark:border-green-400/40",
+      iconBgClass: "bg-green-500/10 dark:bg-green-400/20",
+      iconColorClass: "text-green-500 dark:text-green-400",
+      badgeVariant: "secondary" as const,
+    },
+    {
+      label: "Remediation",
+      icon: CheckCircle2,
+      provider: "Anthropic Claude",
+      text: "Fixes issues & re-attests",
+      accentClass: "border-purple-500/40 dark:border-purple-400/40",
+      iconBgClass: "bg-purple-500/10 dark:bg-purple-400/20",
+      iconColorClass: "text-purple-500 dark:text-purple-400",
+      badgeVariant: "secondary" as const,
+    },
+  ];
+
+  const chainReceipts = [
+    { id: "#1", label: "Origin", model: "GPT-4", hash: "sha256:abc" },
+    { id: "#2", label: "Audit", model: "Claude", hash: "sha256:abc" },
+    { id: "#3", label: "Remediation", model: "Claude", hash: "sha256:def" },
+  ];
+
+  return (
+    <section id="multi-model" className="py-20 sm:py-28 bg-card/50 border-y border-border">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <FadeIn>
+          <div className="text-center max-w-3xl mx-auto mb-16">
+            <Badge variant="outline" className="mb-4">
+              <Shield className="w-3 h-3 mr-1" />
+              Multi-Model Attestation
+            </Badge>
+            <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight mb-4">
+              Separation of Concerns for AI Code
+            </h2>
+            <p className="text-lg text-muted-foreground">
+              The model that writes code should never be the model that certifies it's secure.
+            </p>
+          </div>
+        </FadeIn>
+
+        <div className="relative grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 mb-12">
+          {flowSteps.map((step, i) => (
+            <FadeIn key={step.label} delay={i * 0.15}>
+              <div className="relative">
+                <Card className={`p-6 h-full border-2 ${step.accentClass}`} data-testid={`card-multimodel-${step.label.toLowerCase().replace(/\s+/g, "-")}`}>
+                  <div className={`w-12 h-12 rounded-lg ${step.iconBgClass} flex items-center justify-center mb-4`}>
+                    <step.icon className={`w-6 h-6 ${step.iconColorClass}`} />
+                  </div>
+                  <Badge variant={step.badgeVariant} className="mb-3">
+                    {step.label}
+                  </Badge>
+                  <p className="font-semibold text-sm mb-1">{step.provider}</p>
+                  <p className="text-sm text-muted-foreground">{step.text}</p>
+                </Card>
+                {i < flowSteps.length - 1 && (
+                  <div className="hidden md:flex absolute top-1/2 -right-6 -translate-y-1/2 z-10 items-center justify-center w-8">
+                    <ArrowRight className="w-5 h-5 text-muted-foreground" />
+                  </div>
+                )}
+              </div>
+            </FadeIn>
+          ))}
+        </div>
+
+        <FadeIn delay={0.5}>
+          <Card className="p-6 sm:p-8 bg-primary/5 dark:bg-primary/10 border-primary/20 mb-12">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-full bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                <Shield className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <h4 className="font-semibold mb-2">Key Principle</h4>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  ForgeProof enforces that security audit attestations must come from a different AI provider than the origin. OpenAI cannot audit OpenAI's code. This creates genuine independent verification.
+                </p>
+              </div>
+            </div>
+          </Card>
+        </FadeIn>
+
+        <FadeIn delay={0.6}>
+          <div className="text-center mb-6">
+            <h3 className="font-display text-lg font-semibold mb-2">Attestation Chain</h3>
+            <p className="text-sm text-muted-foreground">How the cryptographic chain of trust is built</p>
+          </div>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-0">
+            {chainReceipts.map((receipt, i) => (
+              <div key={receipt.id} className="flex items-center gap-3">
+                <Card className="p-4 text-center min-w-[140px]" data-testid={`card-chain-receipt-${i}`}>
+                  <p className="font-mono text-xs text-muted-foreground mb-1">Receipt {receipt.id}</p>
+                  <p className="font-semibold text-sm mb-0.5">{receipt.label}</p>
+                  <p className="text-xs text-muted-foreground">{receipt.model}</p>
+                  <p className="font-mono text-xs text-primary mt-1">{receipt.hash}</p>
+                </Card>
+                {i < chainReceipts.length - 1 && (
+                  <ArrowRight className="hidden sm:block w-4 h-4 text-muted-foreground shrink-0" />
+                )}
+              </div>
+            ))}
+          </div>
+        </FadeIn>
+      </div>
+    </section>
+  );
+}
+
 function PlatformFeaturesSection() {
   const features = [
+    {
+      icon: Shield,
+      title: "Multi-Model Attestation",
+      desc: "Enforce separation of concerns: the AI that writes code cannot audit its own security. Different models attest origin and security independently, creating a cryptographic chain of trust.",
+    },
     {
       icon: Link2,
       title: "Hash Chain Verification",
@@ -996,6 +1128,7 @@ export default function LandingPage() {
       <TrustSection />
       <HowItWorksSection />
       <UseCasesSection />
+      <MultiModelSection />
       <PlatformFeaturesSection />
       <ApiSection />
       <CTASection />
