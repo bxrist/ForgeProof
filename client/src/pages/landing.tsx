@@ -30,6 +30,16 @@ import {
   Link2,
   X,
   Shield,
+  Scale,
+  Boxes,
+  BookOpen,
+  Rocket,
+  Heart,
+  GitPullRequest,
+  AlertTriangle,
+  Milestone,
+  Server,
+  Download,
 } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { ForgeProofLogo } from "@/components/ForgeProofLogo";
@@ -136,13 +146,13 @@ function Navbar() {
           </Link>
 
           <div className="hidden md:flex items-center gap-1">
-            <a href="#sovereignty" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">Sovereignty</a>
-            <a href="#how-it-works" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">How It Works</a>
-            <a href="#use-cases" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">Use Cases</a>
-            <a href="#multi-model" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">Multi-Model</a>
-            <a href="#features" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">Features</a>
-            <a href="#api" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">API</a>
-            <Link href="/sdk" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md">SDK</Link>
+            <a href="#how-it-works" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-how-it-works">How It Works</a>
+            <a href="#features" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-features">Features</a>
+            <a href="#why-forgeproof" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-why-forgeproof">Why ForgeProof</a>
+            <a href="#regulations" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-compliance">Compliance</a>
+            <a href="#open-source" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-open-source">Open Source</a>
+            <a href="#roadmap" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-roadmap">Roadmap</a>
+            <Link href="/sdk" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-sdk">SDK</Link>
           </div>
 
           <div className="hidden md:flex items-center gap-3">
@@ -200,16 +210,16 @@ function Navbar() {
             animate={{ opacity: 1, height: "auto" }}
             className="md:hidden pb-4 space-y-2"
           >
-            <a href="#sovereignty" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>Sovereignty</a>
-            <a href="#how-it-works" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>How It Works</a>
-            <a href="#use-cases" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>Use Cases</a>
-            <a href="#multi-model" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>Multi-Model</a>
-            <a href="#features" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>Features</a>
-            <a href="#api" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>API</a>
-            <Link href="/sdk" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>SDK</Link>
-            <Link href="/analytics" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>Analytics</Link>
-            <Link href="/verify" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>Verify</Link>
-            <Link href="/lookup" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)}>Lookup</Link>
+            <a href="#how-it-works" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-how-it-works">How It Works</a>
+            <a href="#features" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-features">Features</a>
+            <a href="#why-forgeproof" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-why-forgeproof">Why ForgeProof</a>
+            <a href="#regulations" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-compliance">Compliance</a>
+            <a href="#open-source" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-open-source">Open Source</a>
+            <a href="#roadmap" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-roadmap">Roadmap</a>
+            <Link href="/sdk" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-sdk">SDK</Link>
+            <Link href="/demo" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-demo">Demo</Link>
+            <Link href="/verify" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-verify">Verify</Link>
+            <Link href="/lookup" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-lookup">Lookup</Link>
             <div className="flex flex-col gap-2 pt-2">
               <a href="https://github.com" target="_blank" rel="noopener noreferrer">
                 <Button variant="outline" size="sm" className="w-full">
@@ -867,6 +877,480 @@ function PlatformFeaturesSection() {
   );
 }
 
+function WhyForgeProofSection() {
+  const competitors = [
+    {
+      name: "Sigstore / SLSA / in-toto",
+      focus: "Build Artifact Attestation",
+      desc: "Proves a binary was built from specific source code in a trusted CI/CD environment. Industry standard for container image and package signing.",
+      gap: "Doesn't track which AI model wrote the source code, where the model operates, or whether a different AI independently audited it.",
+      icon: Boxes,
+      color: "text-orange-500 dark:text-orange-400",
+      bgColor: "bg-orange-500/10 dark:bg-orange-400/20",
+    },
+    {
+      name: "C2PA / Content Credentials",
+      focus: "Media Provenance",
+      desc: "Attaches provenance metadata to images, video, and audio. Backed by Adobe, Google, Microsoft. Exploring text/code extensions.",
+      gap: "Designed for media files, not code. Code can be trivially refactored to remove watermarks, making watermarking-based approaches impractical.",
+      icon: Eye,
+      color: "text-cyan-500 dark:text-cyan-400",
+      bgColor: "bg-cyan-500/10 dark:bg-cyan-400/20",
+    },
+    {
+      name: "Enterprise Tools (Cycode, Legit Security)",
+      focus: "Pipeline Hardening",
+      desc: "Commercial platforms for build pipeline security, SBOM generation, and artifact signing. Private logs avoid public transparency.",
+      gap: "Closed-source, vendor-locked, and focused on build pipelines rather than AI code generation provenance. No multi-model separation of concerns.",
+      icon: Building2,
+      color: "text-violet-500 dark:text-violet-400",
+      bgColor: "bg-violet-500/10 dark:bg-violet-400/20",
+    },
+  ];
+
+  return (
+    <section id="why-forgeproof" className="py-20 sm:py-28">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <FadeIn>
+          <div className="text-center max-w-3xl mx-auto mb-16">
+            <Badge variant="outline" className="mb-4">
+              <Scale className="w-3 h-3 mr-1" />
+              Competitive Landscape
+            </Badge>
+            <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight mb-4">
+              Why ForgeProof?
+            </h2>
+            <p className="text-lg text-muted-foreground">
+              Existing tools answer "was this binary built from this source?" ForgeProof answers the question they can't:{" "}
+              <span className="text-foreground font-medium">"Which AI wrote this code, from where, and who independently verified it?"</span>
+            </p>
+          </div>
+        </FadeIn>
+
+        <div className="space-y-6 mb-12">
+          {competitors.map((comp, i) => (
+            <FadeIn key={comp.name} delay={i * 0.1}>
+              <Card className="p-6 sm:p-8" data-testid={`card-competitor-${i}`}>
+                <div className="grid md:grid-cols-[1fr_auto_1fr] gap-6 items-start">
+                  <div>
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className={`w-10 h-10 rounded-lg ${comp.bgColor} flex items-center justify-center`}>
+                        <comp.icon className={`w-5 h-5 ${comp.color}`} />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold">{comp.name}</h4>
+                        <p className="text-xs text-muted-foreground">{comp.focus}</p>
+                      </div>
+                    </div>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{comp.desc}</p>
+                  </div>
+                  <div className="hidden md:flex items-center self-center">
+                    <ArrowRight className="w-5 h-5 text-muted-foreground" />
+                  </div>
+                  <div className="md:border-l md:border-border md:pl-6">
+                    <div className="flex items-center gap-2 mb-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-500" />
+                      <span className="text-sm font-medium text-amber-600 dark:text-amber-400">The Gap</span>
+                    </div>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{comp.gap}</p>
+                  </div>
+                </div>
+              </Card>
+            </FadeIn>
+          ))}
+        </div>
+
+        <FadeIn delay={0.4}>
+          <Card className="p-6 sm:p-8 bg-primary/5 dark:bg-primary/10 border-primary/20">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-full bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                <ForgeProofLogo size={28} />
+              </div>
+              <div>
+                <h4 className="font-semibold mb-2 text-lg">ForgeProof Fills the Gap</h4>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                  ForgeProof is purpose-built for the AI code generation era. It sits above build attestation tools, answering questions that Sigstore, SLSA, and C2PA were never designed to address.
+                </p>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  {[
+                    "Which AI model generated each file",
+                    "Which country/jurisdiction the model operates in",
+                    "Independent security audit by a different AI provider",
+                    "Cryptographic chain linking origin to audit to remediation",
+                    "Open source and self-hostable - no vendor lock-in",
+                    "Designed for CMMC, EU AI Act, and emerging regulations",
+                  ].map((point) => (
+                    <div key={point} className="flex items-start gap-2 text-sm">
+                      <CheckCircle2 className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+                      <span>{point}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </Card>
+        </FadeIn>
+      </div>
+    </section>
+  );
+}
+
+function RegulatorySection() {
+  const regulations = [
+    {
+      name: "CMMC 2.0",
+      fullName: "Cybersecurity Maturity Model Certification",
+      status: "Effective Nov 2025",
+      statusColor: "text-red-500 dark:text-red-400",
+      jurisdiction: "United States (DoD)",
+      relevance: "Level 2 requires 110 NIST SP 800-171 controls including audit logging, configuration management, and traceability for all code in defense systems. AI-generated code must meet the same controls.",
+      icon: Shield,
+    },
+    {
+      name: "NDAA FY2026 AI Framework",
+      fullName: "National Defense Authorization Act - AI Security Extension",
+      status: "In development",
+      statusColor: "text-amber-500 dark:text-amber-400",
+      jurisdiction: "United States (DoD)",
+      relevance: "Directs DoD to develop an AI security framework as a CMMC extension covering AI source code, model weights, and training data. Expected to result in DFARS amendments for defense contractor compliance.",
+      icon: Building2,
+    },
+    {
+      name: "EU AI Act",
+      fullName: "Regulation (EU) 2024/1689",
+      status: "Full applicability Aug 2026",
+      statusColor: "text-amber-500 dark:text-amber-400",
+      jurisdiction: "European Union",
+      relevance: "High-risk AI systems require complete technical documentation: software architecture, data provenance, training methodology, and supply chain transparency. Article 12 mandates automatic logging for traceability.",
+      icon: Globe,
+    },
+    {
+      name: "EU Cyber Resilience Act",
+      fullName: "CRA - Software Supply Chain Security",
+      status: "Effective 2025-2027",
+      statusColor: "text-amber-500 dark:text-amber-400",
+      jurisdiction: "European Union",
+      relevance: "Requires SBOMs with provenance data, version-specific traceability to build processes, and vulnerability handling for all software products sold in the EU market.",
+      icon: Lock,
+    },
+    {
+      name: "NIST AI 100-4",
+      fullName: "Reducing Risks Posed by Synthetic Content",
+      status: "Published Nov 2024",
+      statusColor: "text-green-500 dark:text-green-400",
+      jurisdiction: "United States (Voluntary)",
+      relevance: "Recommends digital watermarking, metadata recording, and provenance tracking for AI-generated content including code. Endorses C2PA-style manifests for code provenance.",
+      icon: FileCheck,
+    },
+    {
+      name: "US State AI Laws",
+      fullName: "Emerging state-level AI transparency and accountability legislation",
+      status: "Evolving 2025-2026",
+      statusColor: "text-amber-500 dark:text-amber-400",
+      jurisdiction: "US States",
+      relevance: "Multiple US states are advancing legislation that incentivizes or requires NIST AI RMF adoption, AI-generated content disclosure, and provenance tracking for AI outputs used in regulated industries.",
+      icon: Scale,
+    },
+  ];
+
+  return (
+    <section id="regulations" className="py-20 sm:py-28 bg-card/50 border-y border-border">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <FadeIn>
+          <div className="text-center max-w-3xl mx-auto mb-16">
+            <Badge variant="outline" className="mb-4">
+              <Scale className="w-3 h-3 mr-1" />
+              Regulatory Landscape
+            </Badge>
+            <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight mb-4">
+              Code Provenance Is Becoming Mandatory
+            </h2>
+            <p className="text-lg text-muted-foreground">
+              Governments worldwide are moving from voluntary guidance to enforceable requirements for AI-generated code traceability. Organizations that build provenance infrastructure now will be ready when compliance becomes mandatory.
+            </p>
+          </div>
+        </FadeIn>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
+          {regulations.map((reg, i) => (
+            <FadeIn key={reg.name} delay={i * 0.08}>
+              <Card className="p-5 h-full" data-testid={`card-regulation-${i}`}>
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-lg bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                    <reg.icon className="w-5 h-5 text-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <h4 className="font-semibold">{reg.name}</h4>
+                      <span className={`text-xs font-medium ${reg.statusColor}`}>{reg.status}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-2">{reg.fullName} &middot; {reg.jurisdiction}</p>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{reg.relevance}</p>
+                  </div>
+                </div>
+              </Card>
+            </FadeIn>
+          ))}
+        </div>
+
+        <FadeIn delay={0.5}>
+          <Card className="p-6 sm:p-8 bg-primary/5 dark:bg-primary/10 border-primary/20">
+            <div className="text-center max-w-2xl mx-auto">
+              <h4 className="font-display text-lg font-semibold mb-3">How ForgeProof Helps</h4>
+              <p className="text-sm text-muted-foreground leading-relaxed mb-6">
+                ForgeProof generates the audit trail, cryptographic proof, and provenance documentation that these regulations demand - before compliance deadlines arrive.
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                {[
+                  { label: "Audit Logging", desc: "CMMC AU family" },
+                  { label: "Traceability", desc: "EU AI Act Art. 12" },
+                  { label: "Provenance Metadata", desc: "NIST AI 100-4" },
+                  { label: "Supply Chain Docs", desc: "CRA/SBOM" },
+                ].map((item) => (
+                  <div key={item.label} className="text-center">
+                    <p className="font-semibold text-sm">{item.label}</p>
+                    <p className="text-xs text-muted-foreground">{item.desc}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Card>
+        </FadeIn>
+      </div>
+    </section>
+  );
+}
+
+function OpenSourceSection() {
+  return (
+    <section id="open-source" className="py-20 sm:py-28">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <FadeIn>
+          <div className="text-center max-w-3xl mx-auto mb-16">
+            <Badge variant="outline" className="mb-4">
+              <Heart className="w-3 h-3 mr-1" />
+              Open Source
+            </Badge>
+            <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight mb-4">
+              Free, Open, and Yours to Deploy
+            </h2>
+            <p className="text-lg text-muted-foreground">
+              ForgeProof is released under the Apache License 2.0. Download it, self-host it, modify it, and integrate it into your workflow. All we ask is attribution.
+            </p>
+          </div>
+        </FadeIn>
+
+        <div className="grid md:grid-cols-3 gap-8 mb-12">
+          <FadeIn delay={0.1}>
+            <Card className="p-6 h-full" data-testid="card-open-source-license">
+              <div className="w-12 h-12 rounded-lg bg-primary/10 dark:bg-primary/20 flex items-center justify-center mb-5">
+                <Scale className="w-6 h-6 text-primary" />
+              </div>
+              <h3 className="font-display text-lg font-semibold mb-3">Apache License 2.0</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                Use ForgeProof for any purpose - commercial or personal. Modify it freely. Distribute it. The only requirement: keep the attribution notices intact so the original creators are recognized.
+              </p>
+              <ul className="space-y-2">
+                {[
+                  "Free for commercial and personal use",
+                  "Modify and distribute freely",
+                  "Patent grant included",
+                  "Attribution required (NOTICE file)",
+                ].map((item) => (
+                  <li key={item} className="flex items-start gap-2 text-sm">
+                    <CheckCircle2 className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          </FadeIn>
+
+          <FadeIn delay={0.2}>
+            <Card className="p-6 h-full" data-testid="card-open-source-selfhost">
+              <div className="w-12 h-12 rounded-lg bg-primary/10 dark:bg-primary/20 flex items-center justify-center mb-5">
+                <Server className="w-6 h-6 text-primary" />
+              </div>
+              <h3 className="font-display text-lg font-semibold mb-3">Self-Host Anywhere</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                Run ForgeProof on your own infrastructure. Keep attestation data on-premises for maximum security and compliance. No external dependencies required.
+              </p>
+              <ul className="space-y-2">
+                {[
+                  "Node.js + PostgreSQL - standard stack",
+                  "Docker-ready deployment",
+                  "On-premises or cloud - your choice",
+                  "No vendor lock-in or external calls",
+                ].map((item) => (
+                  <li key={item} className="flex items-start gap-2 text-sm">
+                    <CheckCircle2 className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          </FadeIn>
+
+          <FadeIn delay={0.3}>
+            <Card className="p-6 h-full" data-testid="card-open-source-community">
+              <div className="w-12 h-12 rounded-lg bg-primary/10 dark:bg-primary/20 flex items-center justify-center mb-5">
+                <GitPullRequest className="w-6 h-6 text-primary" />
+              </div>
+              <h3 className="font-display text-lg font-semibold mb-3">Community-Driven</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                ForgeProof is built in the open. Contributions are welcome - from bug fixes to new attestation types to integrations with additional AI providers.
+              </p>
+              <ul className="space-y-2">
+                {[
+                  "Contribute on GitHub",
+                  "Report issues and request features",
+                  "Build integrations and plugins",
+                  "Join the provenance community",
+                ].map((item) => (
+                  <li key={item} className="flex items-start gap-2 text-sm">
+                    <CheckCircle2 className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          </FadeIn>
+        </div>
+
+        <FadeIn delay={0.4}>
+          <div className="flex flex-wrap justify-center items-center gap-4">
+            <a href="https://github.com" target="_blank" rel="noopener noreferrer">
+              <Button size="lg" variant="outline" data-testid="button-opensource-github">
+                <SiGithub className="w-4 h-4 mr-2" />
+                View on GitHub
+              </Button>
+            </a>
+            <a href="https://github.com" target="_blank" rel="noopener noreferrer">
+              <Button size="lg" variant="outline" data-testid="button-opensource-download">
+                <Download className="w-4 h-4 mr-2" />
+                Download Latest Release
+              </Button>
+            </a>
+          </div>
+        </FadeIn>
+      </div>
+    </section>
+  );
+}
+
+function RoadmapSection() {
+  const completed = [
+    "Ed25519 cryptographic attestation receipts",
+    "SHA-256 hash-chained attestation ledger",
+    "Multi-model attestation with provider separation",
+    "GitHub OAuth integration and webhook listener",
+    "Repository sync and auto-attestation on push",
+    "MCP Tool Server for AI agent integration",
+    "OpenAPI spec for GPT Actions",
+    "Analytics dashboard with provider/model/country breakdowns",
+    "Badge embeds for repositories and attestations",
+    "Certificate export (printable HTML)",
+    "Team/organization support",
+    "Audit logging with full activity trail",
+    "Public verification and lookup endpoints",
+    "SDK documentation (Python, TypeScript, curl)",
+    "Geographic compliance tracking",
+    "Email notification preferences",
+  ];
+
+  const planned = [
+    { item: "SLSA provenance predicate integration", desc: "Generate SLSA-compatible provenance alongside ForgeProof receipts" },
+    { item: "CI/CD pipeline plugins", desc: "GitHub Actions, GitLab CI, and Jenkins plugins for automatic attestation" },
+    { item: "Additional AI provider integrations", desc: "First-class support for Gemini, Mistral, Llama, and more" },
+    { item: "SBOM generation", desc: "Software Bill of Materials with ForgeProof provenance data" },
+    { item: "Policy engine", desc: "Define and enforce attestation policies per repository or organization" },
+    { item: "Hosted service option", desc: "Managed ForgeProof instance for teams who prefer not to self-host" },
+    { item: "Attestation federation", desc: "Cross-instance attestation verification for supply chain transparency" },
+    { item: "IDE plugins", desc: "VS Code and JetBrains extensions for inline attestation status" },
+  ];
+
+  return (
+    <section id="roadmap" className="py-20 sm:py-28 bg-card/50 border-y border-border">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <FadeIn>
+          <div className="text-center max-w-3xl mx-auto mb-16">
+            <Badge variant="outline" className="mb-4">
+              <Milestone className="w-3 h-3 mr-1" />
+              Roadmap
+            </Badge>
+            <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight mb-4">
+              Built and Building
+            </h2>
+            <p className="text-lg text-muted-foreground">
+              ForgeProof is production-ready today with a comprehensive feature set. Here's what's done and what's coming next.
+            </p>
+          </div>
+        </FadeIn>
+
+        <div className="grid md:grid-cols-2 gap-8 lg:gap-12">
+          <FadeIn delay={0.1}>
+            <div>
+              <div className="flex items-center gap-2 mb-6">
+                <div className="w-8 h-8 rounded-full bg-green-500/10 dark:bg-green-400/20 flex items-center justify-center">
+                  <CheckCircle2 className="w-4 h-4 text-green-500 dark:text-green-400" />
+                </div>
+                <h3 className="font-display text-lg font-semibold">Shipped</h3>
+                <Badge variant="secondary" className="ml-auto">{completed.length} features</Badge>
+              </div>
+              <div className="space-y-2.5">
+                {completed.map((item) => (
+                  <div key={item} className="flex items-start gap-2.5 text-sm">
+                    <CheckCircle2 className="w-4 h-4 text-green-500 dark:text-green-400 mt-0.5 shrink-0" />
+                    <span>{item}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </FadeIn>
+
+          <FadeIn delay={0.2}>
+            <div>
+              <div className="flex items-center gap-2 mb-6">
+                <div className="w-8 h-8 rounded-full bg-blue-500/10 dark:bg-blue-400/20 flex items-center justify-center">
+                  <Rocket className="w-4 h-4 text-blue-500 dark:text-blue-400" />
+                </div>
+                <h3 className="font-display text-lg font-semibold">Planned</h3>
+                <Badge variant="secondary" className="ml-auto">{planned.length} items</Badge>
+              </div>
+              <div className="space-y-4">
+                {planned.map((item) => (
+                  <div key={item.item} className="flex items-start gap-2.5">
+                    <Rocket className="w-4 h-4 text-blue-500 dark:text-blue-400 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium">{item.item}</p>
+                      <p className="text-xs text-muted-foreground">{item.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </FadeIn>
+        </div>
+
+        <FadeIn delay={0.4}>
+          <Card className="mt-12 p-6 sm:p-8 text-center bg-primary/5 dark:bg-primary/10 border-primary/20">
+            <h4 className="font-semibold mb-2">Want to influence the roadmap?</h4>
+            <p className="text-sm text-muted-foreground mb-4 max-w-lg mx-auto">
+              ForgeProof is community-driven. Open an issue on GitHub to request features, report bugs, or propose integrations.
+            </p>
+            <a href="https://github.com" target="_blank" rel="noopener noreferrer">
+              <Button variant="outline" data-testid="button-roadmap-github">
+                <SiGithub className="w-4 h-4 mr-2" />
+                Open an Issue
+              </Button>
+            </a>
+          </Card>
+        </FadeIn>
+      </div>
+    </section>
+  );
+}
+
 function ApiSection() {
   const [activeAgent, setActiveAgent] = useState<"openai" | "claude" | "replit">("openai");
 
@@ -1064,8 +1548,8 @@ function Footer() {
   return (
     <footer className="border-t border-border bg-card/50 py-12">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-          <div className="space-y-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-8">
+          <div className="col-span-2 md:col-span-1 space-y-3">
             <div className="flex items-center gap-2">
               <ForgeProofLogo size={36} />
               <span className="font-display font-bold tracking-tight">ForgeProof</span>
@@ -1073,19 +1557,20 @@ function Footer() {
             <p className="text-sm text-muted-foreground">
               Code provenance for the AI era.
             </p>
-            <div className="text-sm text-muted-foreground">
-              &copy; 2026 ForgeProof. Open Source.
+            <div className="text-xs text-muted-foreground space-y-1">
+              <p>&copy; 2026 ForgeProof Contributors</p>
+              <p>Licensed under <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors underline" data-testid="link-footer-license">Apache License 2.0</a></p>
             </div>
           </div>
 
           <div>
             <h4 className="font-semibold text-sm mb-3">Platform</h4>
             <ul className="space-y-2 text-sm text-muted-foreground">
-              <li><a href="#sovereignty" className="hover:text-foreground transition-colors">Sovereignty</a></li>
               <li><a href="#how-it-works" className="hover:text-foreground transition-colors">How It Works</a></li>
-              <li><a href="#use-cases" className="hover:text-foreground transition-colors">Use Cases</a></li>
               <li><a href="#features" className="hover:text-foreground transition-colors">Features</a></li>
-              <li><a href="#api" className="hover:text-foreground transition-colors">API</a></li>
+              <li><a href="#why-forgeproof" className="hover:text-foreground transition-colors">Why ForgeProof</a></li>
+              <li><a href="#regulations" className="hover:text-foreground transition-colors">Compliance</a></li>
+              <li><a href="#roadmap" className="hover:text-foreground transition-colors">Roadmap</a></li>
             </ul>
           </div>
 
@@ -1101,14 +1586,26 @@ function Footer() {
           </div>
 
           <div>
-            <h4 className="font-semibold text-sm mb-3">Connect</h4>
+            <h4 className="font-semibold text-sm mb-3">Open Source</h4>
             <ul className="space-y-2 text-sm text-muted-foreground">
+              <li><a href="#open-source" className="hover:text-foreground transition-colors">About</a></li>
               <li>
                 <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors flex items-center gap-1.5">
                   <SiGithub className="w-3.5 h-3.5" />
                   GitHub
                 </a>
               </li>
+              <li><a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">License (Apache 2.0)</a></li>
+            </ul>
+          </div>
+
+          <div>
+            <h4 className="font-semibold text-sm mb-3">Standards</h4>
+            <ul className="space-y-2 text-sm text-muted-foreground">
+              <li><a href="https://slsa.dev" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">SLSA</a></li>
+              <li><a href="https://c2pa.org" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">C2PA</a></li>
+              <li><a href="https://www.nist.gov/itl/ai-risk-management-framework" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">NIST AI RMF</a></li>
+              <li><a href="https://in-toto.io" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">in-toto</a></li>
             </ul>
           </div>
         </div>
@@ -1130,6 +1627,10 @@ export default function LandingPage() {
       <UseCasesSection />
       <MultiModelSection />
       <PlatformFeaturesSection />
+      <WhyForgeProofSection />
+      <RegulatorySection />
+      <OpenSourceSection />
+      <RoadmapSection />
       <ApiSection />
       <CTASection />
       <Footer />

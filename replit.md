@@ -6,7 +6,7 @@ ForgeProof is a GitHub-integrated code provenance attestation platform. It track
 ## Architecture
 
 ### Frontend (React + Vite)
-- **Landing Page** (`client/src/pages/landing.tsx`) - Comprehensive informational website with sovereignty, trust architecture, how it works, use cases, platform features grid, API integration sections
+- **Landing Page** (`client/src/pages/landing.tsx`) - Comprehensive informational website with sovereignty, trust architecture, how it works, use cases, multi-model attestation, platform features grid, competitive landscape (Why ForgeProof), regulatory compliance section, open source/Apache 2.0 section, roadmap, API integration sections
 - **Demo Page** (`client/src/pages/demo.tsx`) - Public read-only dashboard showing self-attesting seed data, no login required
 - **Demo Attestation Detail** (`client/src/pages/demo-attestation-detail.tsx`) - Public individual receipt view with JSON download and certificate export
 - **Dashboard** (`client/src/pages/dashboard.tsx`) - Protected page with tabs: Attestations, Repositories (with GitHub sync), API Keys (with notification prefs), Teams (organizations), Activity Log (audit trail)
@@ -83,6 +83,11 @@ ForgeProof is a GitHub-integrated code provenance attestation platform. It track
 - Inter font for body, Space Grotesk for display, JetBrains Mono for code
 - Security/trust-oriented blue primary color scheme
 
+## License
+- Apache License 2.0
+- LICENSE and NOTICE files in project root
+- Attribution required for derivative works
+
 ## Recent Changes (Feb 2026)
 - Initial MVP implementation complete
 - Phase 1: Rate limiting, search/filtering, public lookup page, verify page
@@ -94,3 +99,5 @@ ForgeProof is a GitHub-integrated code provenance attestation platform. It track
 - Phase 7: Error boundary, SEO meta tags on all pages
 - Phase 8: Audit logging, team/org support, notification preferences
 - Phase 9: Landing page comprehensive feature documentation
+- Phase 10: Multi-model attestation with provider separation enforcement
+- Phase 11: Apache 2.0 licensing, competitive landscape (Why ForgeProof vs Sigstore/SLSA/C2PA), regulatory compliance section (CMMC/EU AI Act/NIST), open source section, roadmap

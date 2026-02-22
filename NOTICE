@@ -1,0 +1,13 @@
+ForgeProof - Code Provenance for the AI Era
+Copyright 2026 ForgeProof Contributors
+
+This product was originally created by and is maintained by the ForgeProof
+project contributors. ForgeProof is an open-source code provenance attestation
+platform that uses Ed25519 cryptographic signatures and SHA-256 hash chains to
+track AI-generated code origin, geographic compliance, and multi-model audit
+trails.
+
+This product includes software developed at:
+https://github.com/forgeproof
+
+Licensed under the Apache License, Version 2.0.
