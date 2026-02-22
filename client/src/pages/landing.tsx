@@ -146,12 +146,11 @@ function Navbar() {
           </Link>
 
           <div className="hidden md:flex items-center gap-1">
-            <a href="#how-it-works" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-how-it-works">How It Works</a>
-            <a href="#features" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-features">Features</a>
+            <a href="#architecture" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-architecture">Architecture</a>
+            <a href="#use-cases" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-use-cases">Use Cases</a>
             <a href="#why-forgeproof" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-why-forgeproof">Why ForgeProof</a>
             <a href="#regulations" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-compliance">Compliance</a>
-            <a href="#open-source" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-open-source">Open Source</a>
-            <a href="#roadmap" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-roadmap">Roadmap</a>
+            <Link href="/threat-model" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-threat-model">Threat Model</Link>
             <Link href="/sdk" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-sdk">SDK</Link>
           </div>
 
@@ -210,16 +209,14 @@ function Navbar() {
             animate={{ opacity: 1, height: "auto" }}
             className="md:hidden pb-4 space-y-2"
           >
-            <a href="#how-it-works" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-how-it-works">How It Works</a>
-            <a href="#features" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-features">Features</a>
+            <a href="#architecture" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-architecture">Architecture</a>
+            <a href="#use-cases" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-use-cases">Use Cases</a>
             <a href="#why-forgeproof" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-why-forgeproof">Why ForgeProof</a>
             <a href="#regulations" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-compliance">Compliance</a>
-            <a href="#open-source" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-open-source">Open Source</a>
-            <a href="#roadmap" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-roadmap">Roadmap</a>
+            <Link href="/threat-model" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-threat-model">Threat Model</Link>
+            <Link href="/glossary" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-glossary">Glossary</Link>
             <Link href="/sdk" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-sdk">SDK</Link>
             <Link href="/demo" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-demo">Demo</Link>
-            <Link href="/verify" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-verify">Verify</Link>
-            <Link href="/lookup" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-lookup">Lookup</Link>
             <div className="flex flex-col gap-2 pt-2">
               <a href="https://github.com" target="_blank" rel="noopener noreferrer">
                 <Button variant="outline" size="sm" className="w-full">
@@ -355,68 +352,68 @@ function SovereigntySection() {
           <div className="text-center max-w-3xl mx-auto mb-16">
             <Badge variant="outline" className="mb-4">
               <Globe className="w-3 h-3 mr-1" />
-              Sovereignty & Compliance
+              The Problem
             </Badge>
             <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight mb-4">
-              Model & Data Sovereignty
+              Your Software Supply Chain Has a Blind Spot
             </h2>
             <p className="text-lg text-muted-foreground">
-              As AI models generate an increasing share of production code, organizations need to know exactly which models touched their codebase and where those models operate.
+              AI models now generate production code at scale. But your organization has no record of which model wrote which file, where that model operates, or whether anyone independently verified the output. This is an uncontrolled supply chain risk.
             </p>
           </div>
         </FadeIn>
 
-        <div className="grid md:grid-cols-2 gap-8 lg:gap-12">
-          <FadeIn delay={0.1}>
-            <Card className="p-6 sm:p-8 h-full">
-              <div className="w-12 h-12 rounded-lg bg-primary/10 dark:bg-primary/20 flex items-center justify-center mb-5">
-                <Cpu className="w-6 h-6 text-primary" />
-              </div>
-              <h3 className="font-display text-xl font-semibold mb-3">Model Sovereignty</h3>
-              <p className="text-muted-foreground mb-5 leading-relaxed">
-                Track exactly which AI model produced each piece of code in your repository. From GPT-4 to Claude to Replit Agent, ForgeProof creates a permanent, verifiable record of AI model provenance.
-              </p>
-              <ul className="space-y-3">
-                {[
-                  "Model identification and version tracking",
-                  "Provider attribution (OpenAI, Anthropic, Replit)",
-                  "Generation timestamp with millisecond precision",
-                  "Model capability and permission auditing",
-                ].map((item) => (
-                  <li key={item} className="flex items-start gap-2.5 text-sm">
-                    <CheckCircle2 className="w-4 h-4 text-primary mt-0.5 shrink-0" />
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          </FadeIn>
-
-          <FadeIn delay={0.2}>
-            <Card className="p-6 sm:p-8 h-full">
-              <div className="w-12 h-12 rounded-lg bg-primary/10 dark:bg-primary/20 flex items-center justify-center mb-5">
-                <MapPin className="w-6 h-6 text-primary" />
-              </div>
-              <h3 className="font-display text-xl font-semibold mb-3">Data Sovereignty</h3>
-              <p className="text-muted-foreground mb-5 leading-relaxed">
-                Verify where AI models process and store your data. Critical for GDPR, CCPA, and sector-specific compliance requirements where data residency matters.
-              </p>
-              <ul className="space-y-3">
-                {[
-                  "Geographic origin tracking (country/jurisdiction)",
-                  "GDPR and CCPA compliance verification",
-                  "Cross-border data flow documentation",
-                  "Regulatory audit trail generation",
-                ].map((item) => (
-                  <li key={item} className="flex items-start gap-2.5 text-sm">
-                    <CheckCircle2 className="w-4 h-4 text-primary mt-0.5 shrink-0" />
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          </FadeIn>
+        <div className="grid md:grid-cols-3 gap-6 lg:gap-8 mb-12">
+          {[
+            {
+              icon: AlertTriangle,
+              title: "No Model Accountability",
+              desc: "GPT-4, Claude, Gemini, Copilot — code ships from multiple AI models with no record of which model produced what. When a vulnerability appears, you can't trace it to its source.",
+              color: "text-red-500 dark:text-red-400",
+              bgColor: "bg-red-500/10 dark:bg-red-400/20",
+            },
+            {
+              icon: Globe,
+              title: "No Jurisdiction Tracking",
+              desc: "Your code may be processed by models operating in jurisdictions that conflict with your compliance requirements. Without provenance records, you can't demonstrate data sovereignty.",
+              color: "text-amber-500 dark:text-amber-400",
+              bgColor: "bg-amber-500/10 dark:bg-amber-400/20",
+            },
+            {
+              icon: Shield,
+              title: "No Independent Verification",
+              desc: "The model that writes your code is often the same one that reviews it. Without enforced separation of concerns, there's no genuine independent audit of AI-generated output.",
+              color: "text-amber-500 dark:text-amber-400",
+              bgColor: "bg-amber-500/10 dark:bg-amber-400/20",
+            },
+          ].map((item, i) => (
+            <FadeIn key={item.title} delay={i * 0.1}>
+              <Card className="p-6 h-full" data-testid={`card-problem-${i}`}>
+                <div className={`w-12 h-12 rounded-lg ${item.bgColor} flex items-center justify-center mb-5`}>
+                  <item.icon className={`w-6 h-6 ${item.color}`} />
+                </div>
+                <h3 className="font-display text-lg font-semibold mb-3">{item.title}</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">{item.desc}</p>
+              </Card>
+            </FadeIn>
+          ))}
         </div>
+
+        <FadeIn delay={0.4}>
+          <Card className="p-6 sm:p-8 bg-primary/5 dark:bg-primary/10 border-primary/20">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-full bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                <ForgeProofLogo size={28} />
+              </div>
+              <div>
+                <h4 className="font-semibold text-lg mb-2">ForgeProof is the infrastructure layer that solves this.</h4>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  It creates a cryptographic record of every AI-generated file: which model, which provider, which jurisdiction, when, and who independently verified it. Tamper-evident, hash-chained, and built for regulatory compliance from day one.
+                </p>
+              </div>
+            </div>
+          </Card>
+        </FadeIn>
       </div>
     </section>
   );
@@ -521,6 +518,152 @@ function TrustSection() {
   );
 }
 
+function ArchitectureDiagramSection() {
+  const steps = [
+    {
+      id: "model",
+      label: "AI Model",
+      desc: "GPT-4, Claude, Gemini, or any AI writes code",
+      icon: Cpu,
+      color: "border-blue-500/50 dark:border-blue-400/50",
+      iconBg: "bg-blue-500/10 dark:bg-blue-400/20",
+      iconColor: "text-blue-500 dark:text-blue-400",
+    },
+    {
+      id: "agent",
+      label: "Agent / CI",
+      desc: "Developer tool or CI pipeline calls ForgeProof API",
+      icon: Terminal,
+      color: "border-violet-500/50 dark:border-violet-400/50",
+      iconBg: "bg-violet-500/10 dark:bg-violet-400/20",
+      iconColor: "text-violet-500 dark:text-violet-400",
+    },
+    {
+      id: "artifact",
+      label: "Artifact",
+      desc: "Source file identified by path and content",
+      icon: Code2,
+      color: "border-cyan-500/50 dark:border-cyan-400/50",
+      iconBg: "bg-cyan-500/10 dark:bg-cyan-400/20",
+      iconColor: "text-cyan-500 dark:text-cyan-400",
+    },
+    {
+      id: "hash",
+      label: "SHA-256 Hash",
+      desc: "File content hashed to create unique fingerprint",
+      icon: Hash,
+      color: "border-amber-500/50 dark:border-amber-400/50",
+      iconBg: "bg-amber-500/10 dark:bg-amber-400/20",
+      iconColor: "text-amber-500 dark:text-amber-400",
+    },
+    {
+      id: "signature",
+      label: "Ed25519 Sign",
+      desc: "Receipt signed with server's private key",
+      icon: Fingerprint,
+      color: "border-green-500/50 dark:border-green-400/50",
+      iconBg: "bg-green-500/10 dark:bg-green-400/20",
+      iconColor: "text-green-500 dark:text-green-400",
+    },
+    {
+      id: "ledger",
+      label: "Hash Chain",
+      desc: "Receipt linked to previous entry in tamper-evident ledger",
+      icon: Layers,
+      color: "border-primary/50",
+      iconBg: "bg-primary/10 dark:bg-primary/20",
+      iconColor: "text-primary",
+    },
+    {
+      id: "verify",
+      label: "Verification",
+      desc: "Anyone can verify signatures and chain integrity",
+      icon: Eye,
+      color: "border-green-500/50 dark:border-green-400/50",
+      iconBg: "bg-green-500/10 dark:bg-green-400/20",
+      iconColor: "text-green-500 dark:text-green-400",
+    },
+  ];
+
+  return (
+    <section id="architecture" className="py-20 sm:py-28">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <FadeIn>
+          <div className="text-center max-w-3xl mx-auto mb-16">
+            <Badge variant="outline" className="mb-4">
+              <Layers className="w-3 h-3 mr-1" />
+              Architecture
+            </Badge>
+            <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight mb-4">
+              The Control Boundary
+            </h2>
+            <p className="text-lg text-muted-foreground">
+              From AI model output to publicly verifiable proof — every step is cryptographically secured. Here's how code flows through ForgeProof's attestation pipeline.
+            </p>
+          </div>
+        </FadeIn>
+
+        <div className="relative mb-12">
+          <div className="hidden lg:block absolute top-1/2 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500/20 via-primary/30 to-green-500/20 -translate-y-1/2" />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-4 lg:gap-3">
+            {steps.map((step, i) => (
+              <FadeIn key={step.id} delay={i * 0.08}>
+                <div className="relative flex flex-col items-center text-center" data-testid={`arch-step-${step.id}`}>
+                  <Card className={`p-4 w-full border-2 ${step.color} relative z-10 bg-background`}>
+                    <div className={`w-12 h-12 rounded-full ${step.iconBg} flex items-center justify-center mx-auto mb-3`}>
+                      <step.icon className={`w-5 h-5 ${step.iconColor}`} />
+                    </div>
+                    <h4 className="font-semibold text-sm mb-1">{step.label}</h4>
+                    <p className="text-xs text-muted-foreground leading-relaxed">{step.desc}</p>
+                  </Card>
+                  {i < steps.length - 1 && (
+                    <ArrowRight className="hidden lg:block absolute -right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground z-20" />
+                  )}
+                </div>
+              </FadeIn>
+            ))}
+          </div>
+        </div>
+
+        <FadeIn delay={0.6}>
+          <div className="grid sm:grid-cols-3 gap-4">
+            {[
+              {
+                label: "Trust Boundary",
+                desc: "Everything from hashing through signing happens on your ForgeProof server. Self-host to keep the signing key under your control.",
+                icon: Lock,
+              },
+              {
+                label: "Immutable Record",
+                desc: "Once a receipt is signed and chained, it cannot be modified without breaking the hash chain and invalidating the signature.",
+                icon: Link2,
+              },
+              {
+                label: "Public Verifiability",
+                desc: "Verification requires only the public key. Anyone can independently confirm receipt authenticity without trusting ForgeProof.",
+                icon: Eye,
+              },
+            ].map((item) => (
+              <Card key={item.label} className="p-4" data-testid={`arch-property-${item.label.toLowerCase().replace(/\s+/g, "-")}`}>
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-md bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                    <item.icon className="w-4 h-4 text-primary" />
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-sm mb-1">{item.label}</h4>
+                    <p className="text-xs text-muted-foreground leading-relaxed">{item.desc}</p>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </FadeIn>
+      </div>
+    </section>
+  );
+}
+
 function HowItWorksSection() {
   return (
     <section id="how-it-works" className="py-20 sm:py-28">
@@ -583,6 +726,81 @@ function HowItWorksSection() {
 }
 
 function UseCasesSection() {
+  const useCases = [
+    {
+      icon: Shield,
+      title: "Defense Contractors",
+      audience: "CMMC Level 2+ organizations",
+      desc: "Defense contractors using AI-assisted development need to demonstrate NIST SP 800-171 compliance for all code — including AI-generated output. ForgeProof provides the audit trail, traceability, and configuration management records that CMMC assessors require.",
+      bullets: [
+        "CMMC AU (Audit) family control evidence",
+        "Traceability from AI model to deployed artifact",
+        "US-only model jurisdiction enforcement",
+        "Exportable compliance documentation",
+      ],
+    },
+    {
+      icon: Building2,
+      title: "Government Procurement",
+      audience: "Federal agencies & system integrators",
+      desc: "Federal agencies are increasingly required to understand the AI tools used in software they procure. ForgeProof gives procurement officers verifiable evidence of which AI models contributed to delivered software.",
+      bullets: [
+        "NIST AI RMF alignment documentation",
+        "Supply chain transparency for AI-generated code",
+        "Geographic origin verification for data sovereignty",
+        "Audit-ready provenance reports",
+      ],
+    },
+    {
+      icon: Cpu,
+      title: "AI Development Teams",
+      audience: "Teams using multiple AI models in production",
+      desc: "Development teams using GPT-4, Claude, Copilot, and other models simultaneously need visibility into which model produced what. ForgeProof creates a permanent record across your entire AI-assisted workflow.",
+      bullets: [
+        "Multi-model tracking across repositories",
+        "Security audit attestation with provider separation",
+        "CI/CD integration for automatic attestation",
+        "Analytics by model, provider, and repository",
+      ],
+    },
+    {
+      icon: Layers,
+      title: "Enterprise Software Supply Chain",
+      audience: "Software composition & security teams",
+      desc: "Software supply chain security now extends to AI code generation. ForgeProof adds the missing layer between your AI tools and your SBOM — proving where code originated before it enters your build pipeline.",
+      bullets: [
+        "Complements SLSA and SBOM with AI provenance",
+        "Hash-chained ledger for tamper detection",
+        "Integrates before build attestation (Sigstore/cosign)",
+        "Self-hostable for on-premises supply chain control",
+      ],
+    },
+    {
+      icon: Globe,
+      title: "Regulated Industries",
+      audience: "Finance, healthcare, critical infrastructure",
+      desc: "Regulated industries face emerging requirements around AI transparency and data sovereignty. ForgeProof provides the provenance infrastructure needed before regulations become enforceable.",
+      bullets: [
+        "EU AI Act Article 12 traceability compliance",
+        "Cyber Resilience Act supply chain documentation",
+        "Geographic compliance for data residency laws",
+        "Immutable audit trail for regulatory inspections",
+      ],
+    },
+    {
+      icon: Code2,
+      title: "Open Source Maintainers",
+      audience: "Projects with AI-assisted contributions",
+      desc: "Open source projects increasingly receive AI-generated contributions. ForgeProof lets maintainers and consumers see which models contributed to a project, building trust and transparency.",
+      bullets: [
+        "Badge embeds showing attestation status",
+        "Public verification — no login required",
+        "Apache 2.0 licensed, self-hostable",
+        "Community-driven attestation standards",
+      ],
+    },
+  ];
+
   return (
     <section id="use-cases" className="py-20 sm:py-28 bg-card/50 border-y border-border">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -593,52 +811,36 @@ function UseCasesSection() {
               Use Cases
             </Badge>
             <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight mb-4">
-              Built for Every Team
+              Who Needs Code Provenance
             </h2>
             <p className="text-lg text-muted-foreground">
-              Whether you're a solo developer or an enterprise, ForgeProof provides the provenance guarantees your workflow needs.
+              From defense contractors to open source maintainers, any organization using AI to generate code needs verifiable provenance infrastructure.
             </p>
           </div>
         </FadeIn>
 
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[
-            {
-              icon: Code2,
-              title: "Developer Tools",
-              desc: "Integrate attestation into your CI/CD pipeline. Every AI-assisted commit gets a verifiable receipt automatically.",
-            },
-            {
-              icon: Building2,
-              title: "Enterprise Compliance",
-              desc: "Meet regulatory requirements for AI-generated code with auditable provenance trails and geographic compliance verification.",
-            },
-            {
-              icon: Users,
-              title: "Open Source Projects",
-              desc: "Maintain transparency about which AI models contributed to your project. Build trust with contributors and users.",
-            },
-            {
-              icon: Fingerprint,
-              title: "Security Auditing",
-              desc: "Identify exactly which AI model produced each piece of code during security reviews and vulnerability assessments.",
-            },
-            {
-              icon: Globe,
-              title: "Cross-Border Teams",
-              desc: "Track data sovereignty compliance across distributed teams using different AI providers in different jurisdictions.",
-            },
-            {
-              icon: Terminal,
-              title: "AI Agent Integration",
-              desc: "OpenAI, Claude, and Replit Agent can programmatically attest the code they generate via our REST API.",
-            },
-          ].map((item, i) => (
+          {useCases.map((item, i) => (
             <FadeIn key={item.title} delay={i * 0.08}>
-              <Card className="p-5 h-full">
-                <item.icon className="w-5 h-5 text-primary mb-3" />
-                <h4 className="font-semibold mb-1.5">{item.title}</h4>
-                <p className="text-sm text-muted-foreground leading-relaxed">{item.desc}</p>
+              <Card className="p-6 h-full" data-testid={`card-usecase-${i}`}>
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-lg bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                    <item.icon className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <h4 className="font-semibold">{item.title}</h4>
+                    <p className="text-xs text-muted-foreground">{item.audience}</p>
+                  </div>
+                </div>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-4">{item.desc}</p>
+                <ul className="space-y-1.5">
+                  {item.bullets.map((b) => (
+                    <li key={b} className="flex items-start gap-2 text-xs text-muted-foreground">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-primary mt-0.5 shrink-0" />
+                      <span>{b}</span>
+                    </li>
+                  ))}
+                </ul>
               </Card>
             </FadeIn>
           ))}
@@ -772,6 +974,88 @@ function MultiModelSection() {
   );
 }
 
+function PolicyEnforcementSection() {
+  const policies = [
+    {
+      icon: Globe,
+      title: "Jurisdiction Enforcement",
+      desc: "Restrict attestations to code generated by models operating within approved jurisdictions. Enforce US-only, EU-only, or custom geographic policies per repository or organization.",
+      example: "Policy: Only accept attestations where country_of_origin is 'US' for defense-classified repositories.",
+    },
+    {
+      icon: Cpu,
+      title: "Approved Model Lists",
+      desc: "Define which AI models are authorized to generate code for specific projects. Reject attestations from unapproved models before they enter your provenance chain.",
+      example: "Policy: Only GPT-4-turbo and Claude Sonnet are approved for production code in the payments repository.",
+    },
+    {
+      icon: Shield,
+      title: "Provider Separation",
+      desc: "Enforce that security audit attestations come from a different AI provider than the origin attestation. The model that writes code cannot certify its own security.",
+      example: "Enforcement: OpenAI generates code → Anthropic audits. API rejects same-provider audit attempts.",
+    },
+    {
+      icon: FileCheck,
+      title: "Compliance Evidence",
+      desc: "Generate exportable compliance reports showing policy adherence across your attestation history. Printable certificates, JSON exports, and audit-ready documentation.",
+      example: "Export: HTML certificate showing all attestations in Q1 2026 came from US-based models with independent audits.",
+    },
+  ];
+
+  return (
+    <section id="policy" className="py-20 sm:py-28">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <FadeIn>
+          <div className="text-center max-w-3xl mx-auto mb-16">
+            <Badge variant="outline" className="mb-4">
+              <Lock className="w-3 h-3 mr-1" />
+              Policy Enforcement
+            </Badge>
+            <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight mb-4">
+              Define Rules. Enforce Them Cryptographically.
+            </h2>
+            <p className="text-lg text-muted-foreground">
+              ForgeProof doesn't just record provenance — it enforces organizational policy at the attestation layer. Define which models, providers, and jurisdictions are approved, and ForgeProof rejects non-compliant attestations before they enter the chain.
+            </p>
+          </div>
+        </FadeIn>
+
+        <div className="grid md:grid-cols-2 gap-6 mb-12">
+          {policies.map((policy, i) => (
+            <FadeIn key={policy.title} delay={i * 0.1}>
+              <Card className="p-6 h-full" data-testid={`card-policy-${i}`}>
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-lg bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                    <policy.icon className="w-5 h-5 text-primary" />
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="font-semibold mb-2">{policy.title}</h4>
+                    <p className="text-sm text-muted-foreground leading-relaxed mb-3">{policy.desc}</p>
+                    <div className="bg-muted/50 rounded-md p-3 border border-border/50">
+                      <p className="text-xs font-mono text-muted-foreground">{policy.example}</p>
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            </FadeIn>
+          ))}
+        </div>
+
+        <FadeIn delay={0.5}>
+          <Card className="p-6 sm:p-8 bg-primary/5 dark:bg-primary/10 border-primary/20">
+            <div className="text-center max-w-2xl mx-auto">
+              <h4 className="font-display text-lg font-semibold mb-3">Why This Matters</h4>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                When regulators ask "can you prove your AI-generated code came from approved models operating in approved jurisdictions?" — policy enforcement gives you a cryptographically verifiable answer, not a spreadsheet.
+              </p>
+            </div>
+          </Card>
+        </FadeIn>
+      </div>
+    </section>
+  );
+}
+
 function PlatformFeaturesSection() {
   const features = [
     {
@@ -880,19 +1164,28 @@ function PlatformFeaturesSection() {
 function WhyForgeProofSection() {
   const competitors = [
     {
-      name: "Sigstore / SLSA / in-toto",
-      focus: "Build Artifact Attestation",
-      desc: "Proves a binary was built from specific source code in a trusted CI/CD environment. Industry standard for container image and package signing.",
-      gap: "Doesn't track which AI model wrote the source code, where the model operates, or whether a different AI independently audited it.",
+      name: "Sigstore / cosign / SLSA",
+      focus: "Build Artifact Signing & Attestation",
+      desc: "Proves a binary was built from specific source code in a trusted CI/CD environment. Cosign signs container images; SLSA defines provenance predicates for build processes. Industry standard for supply chain integrity.",
+      gap: "Attests the build process, not the code generation process. Cannot answer: which AI model wrote the source code, where the model operates, or whether a different AI independently audited the output. ForgeProof sits upstream of Sigstore — it attests code origin before the build even starts.",
       icon: Boxes,
       color: "text-orange-500 dark:text-orange-400",
       bgColor: "bg-orange-500/10 dark:bg-orange-400/20",
     },
     {
+      name: "SBOM (SPDX / CycloneDX)",
+      focus: "Software Composition & Dependency Tracking",
+      desc: "Software Bills of Materials list every component, library, and dependency in a software product. Required by executive order for federal suppliers. Critical for vulnerability management.",
+      gap: "SBOMs track what components are in the software, not how they were created. An SBOM tells you the code uses express@4.18 — but not that GPT-4 wrote the authentication module or that Claude audited it. ForgeProof adds the AI provenance layer that SBOMs lack.",
+      icon: Layers,
+      color: "text-emerald-500 dark:text-emerald-400",
+      bgColor: "bg-emerald-500/10 dark:bg-emerald-400/20",
+    },
+    {
       name: "C2PA / Content Credentials",
       focus: "Media Provenance",
       desc: "Attaches provenance metadata to images, video, and audio. Backed by Adobe, Google, Microsoft. Exploring text/code extensions.",
-      gap: "Designed for media files, not code. Code can be trivially refactored to remove watermarks, making watermarking-based approaches impractical.",
+      gap: "Designed for media files, not code. Code can be trivially refactored to remove embedded watermarks, making watermarking-based approaches impractical. ForgeProof uses external attestation receipts that survive code modification and refactoring.",
       icon: Eye,
       color: "text-cyan-500 dark:text-cyan-400",
       bgColor: "bg-cyan-500/10 dark:bg-cyan-400/20",
@@ -900,8 +1193,8 @@ function WhyForgeProofSection() {
     {
       name: "Enterprise Tools (Cycode, Legit Security)",
       focus: "Pipeline Hardening",
-      desc: "Commercial platforms for build pipeline security, SBOM generation, and artifact signing. Private logs avoid public transparency.",
-      gap: "Closed-source, vendor-locked, and focused on build pipelines rather than AI code generation provenance. No multi-model separation of concerns.",
+      desc: "Commercial platforms for build pipeline security, SBOM generation, and artifact signing. Provide CI/CD security posture management and policy enforcement.",
+      gap: "Closed-source, vendor-locked, and focused on build pipeline security rather than AI code generation provenance. No multi-model separation of concerns, no hash-chained attestation ledger, no public verification. ForgeProof is open source and purpose-built for AI code origin.",
       icon: Building2,
       color: "text-violet-500 dark:text-violet-400",
       bgColor: "bg-violet-500/10 dark:bg-violet-400/20",
@@ -1253,12 +1546,18 @@ function RoadmapSection() {
     "Team/organization support",
     "Audit logging with full activity trail",
     "Public verification and lookup endpoints",
-    "SDK documentation (Python, TypeScript, curl)",
+    "SDK documentation with receipt format reference",
     "Geographic compliance tracking",
-    "Email notification preferences",
+    "Threat model and security analysis documentation",
+    "Terminology glossary for onboarding",
+    "Architecture diagram and control boundary docs",
+    "Buyer-specific use case narratives",
+    "Competitive landscape (SLSA, SBOM, C2PA, cosign)",
+    "Regulatory compliance positioning (CMMC, EU AI Act, NIST)",
   ];
 
   const planned = [
+    { item: "Stripe pricing and subscription plans", desc: "Free tier, team, and enterprise pricing with usage-based billing" },
     { item: "SLSA provenance predicate integration", desc: "Generate SLSA-compatible provenance alongside ForgeProof receipts" },
     { item: "CI/CD pipeline plugins", desc: "GitHub Actions, GitLab CI, and Jenkins plugins for automatic attestation" },
     { item: "Additional AI provider integrations", desc: "First-class support for Gemini, Mistral, Llama, and more" },
@@ -1566,46 +1865,48 @@ function Footer() {
           <div>
             <h4 className="font-semibold text-sm mb-3">Platform</h4>
             <ul className="space-y-2 text-sm text-muted-foreground">
-              <li><a href="#how-it-works" className="hover:text-foreground transition-colors">How It Works</a></li>
-              <li><a href="#features" className="hover:text-foreground transition-colors">Features</a></li>
-              <li><a href="#why-forgeproof" className="hover:text-foreground transition-colors">Why ForgeProof</a></li>
-              <li><a href="#regulations" className="hover:text-foreground transition-colors">Compliance</a></li>
-              <li><a href="#roadmap" className="hover:text-foreground transition-colors">Roadmap</a></li>
+              <li><a href="#architecture" className="hover:text-foreground transition-colors" data-testid="link-footer-architecture">Architecture</a></li>
+              <li><a href="#use-cases" className="hover:text-foreground transition-colors" data-testid="link-footer-use-cases">Use Cases</a></li>
+              <li><a href="#why-forgeproof" className="hover:text-foreground transition-colors" data-testid="link-footer-why">Why ForgeProof</a></li>
+              <li><a href="#regulations" className="hover:text-foreground transition-colors" data-testid="link-footer-compliance">Compliance</a></li>
+              <li><a href="#policy" className="hover:text-foreground transition-colors" data-testid="link-footer-policy">Policy Enforcement</a></li>
+              <li><a href="#roadmap" className="hover:text-foreground transition-colors" data-testid="link-footer-roadmap">Roadmap</a></li>
             </ul>
           </div>
 
           <div>
             <h4 className="font-semibold text-sm mb-3">Resources</h4>
             <ul className="space-y-2 text-sm text-muted-foreground">
-              <li><Link href="/demo" className="hover:text-foreground transition-colors">Demo</Link></li>
-              <li><Link href="/verify" className="hover:text-foreground transition-colors">Verify</Link></li>
-              <li><Link href="/lookup" className="hover:text-foreground transition-colors">Lookup</Link></li>
-              <li><Link href="/sdk" className="hover:text-foreground transition-colors">SDK</Link></li>
-              <li><Link href="/analytics" className="hover:text-foreground transition-colors">Analytics</Link></li>
+              <li><Link href="/demo" className="hover:text-foreground transition-colors" data-testid="link-footer-demo">Demo</Link></li>
+              <li><Link href="/sdk" className="hover:text-foreground transition-colors" data-testid="link-footer-sdk">SDK & Receipt Format</Link></li>
+              <li><Link href="/threat-model" className="hover:text-foreground transition-colors" data-testid="link-footer-threat-model">Threat Model</Link></li>
+              <li><Link href="/glossary" className="hover:text-foreground transition-colors" data-testid="link-footer-glossary">Terminology</Link></li>
+              <li><Link href="/verify" className="hover:text-foreground transition-colors" data-testid="link-footer-verify">Verify</Link></li>
+              <li><Link href="/lookup" className="hover:text-foreground transition-colors" data-testid="link-footer-lookup">Lookup</Link></li>
             </ul>
           </div>
 
           <div>
             <h4 className="font-semibold text-sm mb-3">Open Source</h4>
             <ul className="space-y-2 text-sm text-muted-foreground">
-              <li><a href="#open-source" className="hover:text-foreground transition-colors">About</a></li>
+              <li><a href="#open-source" className="hover:text-foreground transition-colors" data-testid="link-footer-open-source">About</a></li>
               <li>
-                <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors flex items-center gap-1.5">
+                <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors flex items-center gap-1.5" data-testid="link-footer-github">
                   <SiGithub className="w-3.5 h-3.5" />
                   GitHub
                 </a>
               </li>
-              <li><a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">License (Apache 2.0)</a></li>
+              <li><a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors" data-testid="link-footer-apache">License (Apache 2.0)</a></li>
             </ul>
           </div>
 
           <div>
             <h4 className="font-semibold text-sm mb-3">Standards</h4>
             <ul className="space-y-2 text-sm text-muted-foreground">
-              <li><a href="https://slsa.dev" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">SLSA</a></li>
-              <li><a href="https://c2pa.org" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">C2PA</a></li>
-              <li><a href="https://www.nist.gov/itl/ai-risk-management-framework" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">NIST AI RMF</a></li>
-              <li><a href="https://in-toto.io" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">in-toto</a></li>
+              <li><a href="https://slsa.dev" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors" data-testid="link-footer-slsa">SLSA</a></li>
+              <li><a href="https://c2pa.org" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors" data-testid="link-footer-c2pa">C2PA</a></li>
+              <li><a href="https://www.nist.gov/itl/ai-risk-management-framework" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors" data-testid="link-footer-nist">NIST AI RMF</a></li>
+              <li><a href="https://in-toto.io" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors" data-testid="link-footer-intoto">in-toto</a></li>
             </ul>
           </div>
         </div>
@@ -1623,9 +1924,11 @@ export default function LandingPage() {
       <StatsSection />
       <SovereigntySection />
       <TrustSection />
+      <ArchitectureDiagramSection />
       <HowItWorksSection />
       <UseCasesSection />
       <MultiModelSection />
+      <PolicyEnforcementSection />
       <PlatformFeaturesSection />
       <WhyForgeProofSection />
       <RegulatorySection />

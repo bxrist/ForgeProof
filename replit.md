@@ -6,14 +6,16 @@ ForgeProof is a GitHub-integrated code provenance attestation platform. It track
 ## Architecture
 
 ### Frontend (React + Vite)
-- **Landing Page** (`client/src/pages/landing.tsx`) - Comprehensive informational website with sovereignty, trust architecture, how it works, use cases, multi-model attestation, platform features grid, competitive landscape (Why ForgeProof), regulatory compliance section, open source/Apache 2.0 section, roadmap, API integration sections
+- **Landing Page** (`client/src/pages/landing.tsx`) - Comprehensive informational website with sovereignty messaging, trust architecture, architecture diagram, how it works, buyer-specific use cases, multi-model attestation, policy enforcement spotlight, platform features grid, competitive landscape (Why ForgeProof vs SLSA/SBOM/C2PA/cosign), regulatory compliance section, open source/Apache 2.0 section, roadmap, API integration sections
 - **Demo Page** (`client/src/pages/demo.tsx`) - Public read-only dashboard showing self-attesting seed data, no login required
 - **Demo Attestation Detail** (`client/src/pages/demo-attestation-detail.tsx`) - Public individual receipt view with JSON download and certificate export
 - **Dashboard** (`client/src/pages/dashboard.tsx`) - Protected page with tabs: Attestations, Repositories (with GitHub sync), API Keys (with notification prefs), Teams (organizations), Activity Log (audit trail)
 - **Attestation Detail** (`client/src/pages/attestation-detail.tsx`) - Individual receipt view with download and certificate export
 - **Verify Page** (`client/src/pages/verify.tsx`) - Hash chain verification UI showing every entry's integrity
 - **Lookup Page** (`client/src/pages/lookup.tsx`) - Public receipt lookup/verification by ID or hash
-- **SDK Docs** (`client/src/pages/sdk.tsx`) - Python/TypeScript/curl code examples, GPT Actions guide, badge embeds
+- **SDK Docs** (`client/src/pages/sdk.tsx`) - Python/TypeScript/curl code examples, receipt format schema with field reference, verification process, GPT Actions guide, badge embeds
+- **Threat Model** (`client/src/pages/threat-model.tsx`) - Security guarantees, trust assumptions, attack scenarios with mitigations, what ForgeProof proves and doesn't prove
+- **Glossary** (`client/src/pages/glossary.tsx`) - 16 key terms with plain language and technical definitions for onboarding
 - **Analytics** (`client/src/pages/analytics.tsx`) - Visual analytics by provider, model, country, compliance status
 - **Custom Logo** (`client/src/components/ForgeProofLogo.tsx`) - Hammer-and-anvil SVG with hash/proof elements
 - **Onboarding** (`client/src/components/OnboardingWalkthrough.tsx`) - First-time user walkthrough with 5 steps
@@ -101,3 +103,4 @@ ForgeProof is a GitHub-integrated code provenance attestation platform. It track
 - Phase 9: Landing page comprehensive feature documentation
 - Phase 10: Multi-model attestation with provider separation enforcement
 - Phase 11: Apache 2.0 licensing, competitive landscape (Why ForgeProof vs Sigstore/SLSA/C2PA), regulatory compliance section (CMMC/EU AI Act/NIST), open source section, roadmap
+- Phase 12: Messaging & positioning overhaul — threat model page, glossary page, architecture diagram, buyer-specific use cases (defense/gov/enterprise/regulated/OSS), policy enforcement spotlight, expanded SBOM/cosign competitive analysis, receipt format documentation in SDK, roadmap updated with Stripe pricing planned

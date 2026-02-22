@@ -448,6 +448,127 @@ export default function SdkPage() {
           />
         </div>
 
+        <div className="mt-16 mb-12" id="receipt-format">
+          <Badge variant="outline" className="mb-4">
+            <Layers className="w-3 h-3 mr-1" />
+            Receipt Format
+          </Badge>
+          <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight mb-3" data-testid="heading-receipt-format">
+            Attestation Receipt Schema
+          </h2>
+          <p className="text-base text-muted-foreground max-w-2xl mb-8">
+            Every attestation produces a signed JSON receipt. This is the canonical format — every field is part of the cryptographic commitment.
+          </p>
+
+          <div className="space-y-6">
+            <Card className="p-6 sm:p-8" data-testid="card-receipt-example">
+              <h3 className="font-display text-lg font-semibold mb-4">Example Receipt</h3>
+              <CodeBlock code={`{
+  "receipt_version": "v1",
+  "id": 42,
+  "file_path": "src/utils/auth.ts",
+  "file_hash": "sha256:a3f2e8c1d9b4a7e6f5c3d2b1a0e9f8d7c6b5a4e3d2c1b0",
+  "model_name": "gpt-4-turbo",
+  "model_provider": "OpenAI",
+  "country_of_origin": "US",
+  "attestation_type": "origin",
+  "timestamp": "2026-02-21T08:30:00.000Z",
+  "signature": "ed25519:7Bf3kQ9xYz...<base64-encoded 64-byte signature>",
+  "entry_hash": "sha256:9c1d4e3f2a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a",
+  "prev_entry_hash": "sha256:8b7a6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e",
+  "repository_id": 15,
+  "user_id": 3,
+  "parent_attestation_id": null,
+  "audit_verdict": null,
+  "audit_details": null
+}`} label="attestation-receipt.json" />
+            </Card>
+
+            <Card className="p-6 sm:p-8" data-testid="card-receipt-fields">
+              <h3 className="font-display text-lg font-semibold mb-4">Field Reference</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm" data-testid="table-receipt-fields">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left p-3 font-semibold">Field</th>
+                      <th className="text-left p-3 font-semibold">Type</th>
+                      <th className="text-left p-3 font-semibold">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      { field: "receipt_version", type: "string", desc: "Schema version. Always \"v1\" for current receipts." },
+                      { field: "id", type: "integer", desc: "Auto-incrementing receipt identifier." },
+                      { field: "file_path", type: "string", desc: "Repository-relative path to the attested file." },
+                      { field: "file_hash", type: "string", desc: "SHA-256 hash of the file content, prefixed with \"sha256:\"." },
+                      { field: "model_name", type: "string", desc: "Specific AI model identifier (e.g., \"gpt-4-turbo\", \"claude-sonnet-4\")." },
+                      { field: "model_provider", type: "string", desc: "AI provider organization (e.g., \"OpenAI\", \"Anthropic\", \"Replit\")." },
+                      { field: "country_of_origin", type: "string", desc: "ISO 3166-1 alpha-2 country code where the model operates." },
+                      { field: "attestation_type", type: "string | null", desc: "Type of attestation: \"origin\", \"security_audit\", \"refactor\", or \"review\"." },
+                      { field: "timestamp", type: "ISO 8601", desc: "UTC timestamp when the attestation was created." },
+                      { field: "signature", type: "string", desc: "Ed25519 signature over the receipt content, prefixed with \"ed25519:\"." },
+                      { field: "entry_hash", type: "string", desc: "SHA-256 hash of this receipt (excluding entry_hash itself). Unique identifier." },
+                      { field: "prev_entry_hash", type: "string | null", desc: "entry_hash of the previous receipt in the hash chain. Null for the first entry." },
+                      { field: "repository_id", type: "integer | null", desc: "ID of the associated repository, if any." },
+                      { field: "user_id", type: "integer | null", desc: "ID of the user who created the attestation." },
+                      { field: "parent_attestation_id", type: "integer | null", desc: "ID of the parent receipt for multi-model chains (e.g., audit references origin)." },
+                      { field: "audit_verdict", type: "string | null", desc: "For security_audit type: \"secure\", \"flagged\", \"remediated\", or \"needs_review\"." },
+                      { field: "audit_details", type: "string | null", desc: "Free-text details from the security audit (findings, recommendations)." },
+                    ].map((row) => (
+                      <tr key={row.field} className="border-b border-border last:border-0">
+                        <td className="p-3"><code className="text-xs bg-muted px-1.5 py-0.5 rounded">{row.field}</code></td>
+                        <td className="p-3 text-muted-foreground text-xs">{row.type}</td>
+                        <td className="p-3 text-muted-foreground">{row.desc}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+
+            <Card className="p-6 sm:p-8" data-testid="card-verification-process">
+              <h3 className="font-display text-lg font-semibold mb-4">Verification Process</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                To independently verify an attestation receipt, follow these steps:
+              </p>
+              <div className="space-y-4">
+                {[
+                  {
+                    step: "1",
+                    title: "Verify the signature",
+                    desc: "Extract the Ed25519 signature from the receipt. Reconstruct the signed payload (all fields except signature and entry_hash). Verify the signature against the ForgeProof server's public key.",
+                  },
+                  {
+                    step: "2",
+                    title: "Verify the entry hash",
+                    desc: "Compute the SHA-256 hash of the canonical JSON representation of the receipt (excluding entry_hash). Compare against the stored entry_hash. Any mismatch indicates tampering.",
+                  },
+                  {
+                    step: "3",
+                    title: "Verify the hash chain",
+                    desc: "Check that this receipt's prev_entry_hash matches the entry_hash of the preceding receipt. Walk the chain from the first entry to confirm no entries have been inserted, removed, or reordered.",
+                  },
+                  {
+                    step: "4",
+                    title: "Verify the file hash",
+                    desc: "Compute the SHA-256 hash of the current file content. Compare against file_hash in the receipt. A mismatch means the file has been modified since attestation.",
+                  },
+                ].map((item) => (
+                  <div key={item.step} className="flex items-start gap-3">
+                    <div className="w-7 h-7 rounded-full bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0 text-xs font-bold text-primary">
+                      {item.step}
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-sm mb-1">{item.title}</h4>
+                      <p className="text-sm text-muted-foreground leading-relaxed">{item.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+        </div>
+
         <div className="space-y-8 mt-12">
           <Card className="p-6 sm:p-8">
             <div className="flex items-start gap-4">

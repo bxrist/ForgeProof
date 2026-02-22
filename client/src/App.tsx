@@ -16,6 +16,8 @@ import VerifyPage from "@/pages/verify";
 import LookupPage from "@/pages/lookup";
 import SdkPage from "@/pages/sdk";
 import AnalyticsPage from "@/pages/analytics";
+import ThreatModelPage from "@/pages/threat-model";
+import GlossaryPage from "@/pages/glossary";
 
 function Router() {
   return (
@@ -29,6 +31,8 @@ function Router() {
       <Route path="/lookup" component={LookupPage} />
       <Route path="/sdk" component={SdkPage} />
       <Route path="/analytics" component={AnalyticsPage} />
+      <Route path="/threat-model" component={ThreatModelPage} />
+      <Route path="/glossary" component={GlossaryPage} />
       <Route component={NotFound} />
     </Switch>
   );
