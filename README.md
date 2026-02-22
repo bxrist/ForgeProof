@@ -87,7 +87,7 @@ Every attestation receipt includes:
 }
 ```
 
-See the [SDK documentation](https://forgeproof.replit.app/sdk#receipt-format) for the complete field reference.
+See the [SDK documentation](https://forgeproof.flyingcloudtech.com/sdk#receipt-format) for the complete field reference.
 
 ## Quick Start
 
@@ -222,7 +222,7 @@ const receipt = await response.json();
 
 ## Threat Model
 
-ForgeProof provides a detailed [threat model](https://forgeproof.replit.app/threat-model) documenting:
+ForgeProof provides a detailed [threat model](https://forgeproof.flyingcloudtech.com/threat-model) documenting:
 - What ForgeProof proves and what it doesn't
 - Trust assumptions and security guarantees
 - Attack scenarios with mitigations
@@ -251,7 +251,7 @@ You may obtain a copy of the License at
 
 ## Links
 
-- **Live Demo:** [forgeproof.replit.app/demo](https://forgeproof.replit.app/demo)
-- **SDK Documentation:** [forgeproof.replit.app/sdk](https://forgeproof.replit.app/sdk)
-- **Threat Model:** [forgeproof.replit.app/threat-model](https://forgeproof.replit.app/threat-model)
+- **Live Demo:** [forgeproof.flyingcloudtech.com/demo](https://forgeproof.flyingcloudtech.com/demo)
+- **SDK Documentation:** [forgeproof.flyingcloudtech.com/sdk](https://forgeproof.flyingcloudtech.com/sdk)
+- **Threat Model:** [forgeproof.flyingcloudtech.com/threat-model](https://forgeproof.flyingcloudtech.com/threat-model)
 - **Flying Cloud Technology:** [flyingcloudtech.com](https://www.flyingcloudtech.com)

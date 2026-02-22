@@ -24,7 +24,7 @@ const pythonCode = `import requests
 import hashlib
 
 class ForgeProofClient:
-    def __init__(self, api_key: str, base_url: str = "https://your-forgeproof.replit.app"):
+    def __init__(self, api_key: str, base_url: str = "https://forgeproof.flyingcloudtech.com"):
         self.api_key = api_key
         self.base_url = base_url
         self.headers = {
@@ -102,7 +102,7 @@ const typescriptCode = `class ForgeProofClient {
   private apiKey: string;
   private baseUrl: string;
 
-  constructor(apiKey: string, baseUrl: string = "https://your-forgeproof.replit.app") {
+  constructor(apiKey: string, baseUrl: string = "https://forgeproof.flyingcloudtech.com") {
     this.apiKey = apiKey;
     this.baseUrl = baseUrl;
   }
@@ -175,7 +175,7 @@ const receipt = await client.attest(
 console.log(receipt);`;
 
 const curlCode = `# Create an attestation
-curl -X POST https://your-forgeproof.replit.app/api/v1/attest \\
+curl -X POST https://forgeproof.flyingcloudtech.com/api/v1/attest \\
   -H "Authorization: Bearer fp_sk_your_key_here" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -187,15 +187,15 @@ curl -X POST https://your-forgeproof.replit.app/api/v1/attest \\
   }'
 
 # Look up a receipt
-curl "https://your-forgeproof.replit.app/api/lookup?q=1"
+curl "https://forgeproof.flyingcloudtech.com/api/lookup?q=1"
 
 # Verify the hash chain
-curl "https://your-forgeproof.replit.app/api/verify/chain"
+curl "https://forgeproof.flyingcloudtech.com/api/verify/chain"
 
 # Get the OpenAPI spec (for GPT Actions)
-curl "https://your-forgeproof.replit.app/api/openapi.json"`;
+curl "https://forgeproof.flyingcloudtech.com/api/openapi.json"`;
 
-const badgeMarkdown = `![ForgeProof](https://your-forgeproof.replit.app/api/badge/1.svg)`;
+const badgeMarkdown = `![ForgeProof](https://forgeproof.flyingcloudtech.com/api/badge/1.svg)`;
 
 const multiModelPythonCode = `import requests
 
@@ -596,7 +596,7 @@ export default function SdkPage() {
                 </div>
                 <div className="mt-4">
                   <CodeBlock
-                    code="https://your-forgeproof.replit.app/api/openapi.json"
+                    code="https://forgeproof.flyingcloudtech.com/api/openapi.json"
                     label="openapi-url"
                   />
                 </div>
