@@ -1567,13 +1567,11 @@ function RoadmapSection() {
   ];
 
   const planned = [
-    { item: "Stripe pricing and subscription plans", desc: "Free tier, team, and enterprise pricing with usage-based billing" },
     { item: "SLSA provenance predicate integration", desc: "Generate SLSA-compatible provenance alongside ForgeProof receipts" },
     { item: "CI/CD pipeline plugins", desc: "GitHub Actions, GitLab CI, and Jenkins plugins for automatic attestation" },
     { item: "Additional AI provider integrations", desc: "First-class support for Gemini, Mistral, Llama, and more" },
     { item: "SBOM generation", desc: "Software Bill of Materials with ForgeProof provenance data" },
     { item: "Policy engine", desc: "Define and enforce attestation policies per repository or organization" },
-    { item: "Hosted service option", desc: "Managed ForgeProof instance for teams who prefer not to self-host" },
     { item: "Attestation federation", desc: "Cross-instance attestation verification for supply chain transparency" },
     { item: "IDE plugins", desc: "VS Code and JetBrains extensions for inline attestation status" },
   ];

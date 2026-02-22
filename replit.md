@@ -107,5 +107,5 @@ ForgeProof is a GitHub-integrated code provenance attestation platform by Flying
 - Phase 9: Landing page comprehensive feature documentation
 - Phase 10: Multi-model attestation with provider separation enforcement
 - Phase 11: Apache 2.0 licensing, competitive landscape (Why ForgeProof vs Sigstore/SLSA/C2PA), regulatory compliance section (CMMC/EU AI Act/NIST), open source section, roadmap
-- Phase 12: Messaging & positioning overhaul — threat model page, glossary page, architecture diagram, buyer-specific use cases (defense/gov/enterprise/regulated/OSS), policy enforcement spotlight, expanded SBOM/cosign competitive analysis, receipt format documentation in SDK, roadmap updated with Stripe pricing planned
+- Phase 12: Messaging & positioning overhaul — threat model page, glossary page, architecture diagram, buyer-specific use cases (defense/gov/enterprise/regulated/OSS), policy enforcement spotlight, expanded SBOM/cosign competitive analysis, receipt format documentation in SDK, roadmap updated with technical enhancements
 - Phase 13: Flying Cloud Technology branding — ForgeProof is now "a project by Flying Cloud Technology", Flying Cloud logo on landing page header/hero/footer, GitHub repo linked to github.com/bxrist/ForgeProof, comprehensive README.md for GitHub, NOTICE/LICENSE updated with FCT attribution
