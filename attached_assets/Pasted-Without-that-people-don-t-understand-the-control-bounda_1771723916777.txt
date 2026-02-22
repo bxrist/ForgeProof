@@ -1,0 +1,255 @@
+Without that, people don’t understand the control boundary.
+
+⸻
+
+3. No threat model
+
+Critical missing page:
+	•	what this proves
+	•	what it doesn’t prove
+	•	trust assumptions
+	•	attack scenarios
+
+Security buyers expect this.
+
+⸻
+
+4. No receipt format documentation
+
+You need:
+	•	JSON schema
+	•	fields explained
+	•	example
+	•	verification process
+
+Otherwise it looks hand-wavy.
+
+⸻
+
+5. No policy enforcement story
+
+This is your killer feature:
+	•	US-only models
+	•	approved model lists
+	•	jurisdiction enforcement
+	•	compliance evidence
+
+Right now it’s implied, not explicit.
+
+⸻
+
+6. No “Use Cases”
+
+You need explicit:
+	•	defense contractors
+	•	government procurement
+	•	AI development teams
+	•	enterprise software supply chain
+	•	regulated environments
+
+⸻
+
+7. No differentiation vs existing supply-chain tools
+
+Security buyers will ask:
+	•	how is this different from SLSA
+	•	how is this different from SBOM
+	•	how is this different from cosign
+	•	how is this different from build attestation
+
+You need that section.
+
+⸻
+
+8. No terminology definition
+
+Explain:
+	•	attestation
+	•	provenance
+	•	artifact
+	•	chain of custody
+	•	lineage
+	•	model identity
+
+This increases trust.
+
+⸻
+
+⭐ Biggest Positioning Upgrade You Should Make
+
+Right now your product sounds like:
+
+a code signing demo
+
+You want it to sound like:
+
+infrastructure for sovereign software supply chains.
+
+That’s a category.
+
+⸻
+
+Now — Naming Strategy Based on What You Actually Built
+
+Your product is not just forging.
+
+It is:
+	•	provenance infrastructure
+	•	code lineage
+	•	software custody
+	•	artifact verification
+	•	model attestation
+
+So the name should reflect that.
+
+⸻
+
+🧠 Naming Directions That Fit Your Product
+
+Direction A — Custody / Chain of Custody (very strong)
+
+Government / legal language.
+	•	CodeCustody
+	•	SoftwareCustody
+	•	ArtifactCustody
+	•	ChainCustody
+
+Extremely powerful.
+
+⸻
+
+Direction B — Provenance / Origin (industry term)
+
+Matches supply chain language.
+	•	CodeProvenance
+	•	ProvenanceChain
+	•	OriginSeal
+	•	OriginAttest
+	•	OriginProof
+
+Very enterprise.
+
+⸻
+
+Direction C — Lineage (underused but perfect)
+
+Directly describes what you built.
+	•	CodeLineage
+	•	ArtifactLineage
+	•	ModelLineage
+	•	SoftwareLineage
+
+Huge potential.
+
+⸻
+
+Direction D — Attestation / Verification (technical credibility)
+
+Strong security buyers.
+	•	CodeAttest
+	•	SourceAttest
+	•	ArtifactAttest
+	•	AttestChain
+
+⸻
+
+Direction E — Ledger / Chain (your architecture)
+
+Matches your system.
+	•	OriginLedger
+	•	CodeLedger
+	•	ProofLedger
+	•	ArtifactLedger
+
+⸻
+
+🏆 Best Names Based on Your Product + Brand + Domain Probability
+
+These are strongest.
+
+⸻
+
+🥇 CodeCustody
+
+Extremely powerful.
+	•	chain of custody
+	•	legal strength
+	•	government friendly
+	•	category defining
+
+Feels like a platform.
+
+⸻
+
+🥈 OriginSeal
+
+Elegant and memorable.
+	•	forging metaphor
+	•	stamping
+	•	authenticity
+
+Premium feel.
+
+⸻
+
+🥉 CodeLineage
+
+Perfect description of what you built.
+	•	ownership
+	•	origin
+	•	traceability
+
+Huge enterprise credibility.
+
+⸻
+
+⭐ ArtifactChain
+
+Strong supply chain positioning.
+
+⸻
+
+⭐ SourceAttest
+
+Technical + credible.
+
+⸻
+
+⭐ ProofForge (reverse order)
+
+If you want to keep forge theme.
+
+⸻
+
+What I Would Personally Choose
+
+Given your long-term ambition:
+
+→ CodeCustody
+
+or
+
+→ CodeLineage
+
+Both could become categories.
+
+⸻
+
+My Honest Founder-Level Advice
+
+You’re not building:
+	•	a security tool
+	•	a dev utility
+
+You’re building:
+
+the infrastructure layer that proves where software comes from.
+
+Pick a name that sounds like infrastructure.
+
+That’s why:
+	•	custody
+	•	lineage
+	•	origin
+
+are extremely strong.
