@@ -259,23 +259,17 @@ function HeroSection() {
         <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
           <div className="space-y-8">
             <FadeIn>
-              <div className="flex items-center gap-3 mb-3">
-                <a href="https://www.flyingcloudtech.com" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 hover:opacity-80 transition-opacity" data-testid="link-hero-fct">
-                  <FlyingCloudLogo size={80} />
-                  <span className="text-xs text-muted-foreground font-medium">A Flying Cloud Technology Project</span>
-                </a>
-              </div>
-              <Badge variant="secondary" className="mb-2">
-                <Zap className="w-3 h-3 mr-1" />
-                Now with Ed25519 Cryptographic Attestation
-              </Badge>
-            </FadeIn>
-
-            <FadeIn delay={0.1}>
-              <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.1]">
+              <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.1] mb-6">
                 Code Provenance{" "}
                 <span className="text-primary">for the AI Era</span>
               </h1>
+              <div className="flex flex-col items-start gap-4 mb-8">
+                <span className="text-lg font-medium text-foreground tracking-tight">A Flying Cloud Technology Project</span>
+                <Badge variant="secondary" className="px-3 py-1 text-sm font-medium">
+                  <Zap className="w-3.5 h-3.5 mr-2 text-primary fill-primary/20" />
+                  Now with Ed25519 Cryptographic Attestation
+                </Badge>
+              </div>
             </FadeIn>
 
             <FadeIn delay={0.2}>
