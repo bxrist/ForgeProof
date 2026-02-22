@@ -142,7 +142,7 @@ function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between gap-4 h-16">
           <Link href="/" className="flex items-center gap-3" data-testid="link-home">
-            <FlyingCloudLogo size={52} />
+            <FlyingCloudLogo size={84} />
             <div className="flex flex-col leading-tight">
               <span className="font-display font-bold text-lg tracking-tight" data-testid="logo-text">ForgeProof</span>
               <span className="text-[9px] text-muted-foreground tracking-wide uppercase hidden sm:block">by Flying Cloud Technology</span>
@@ -261,7 +261,7 @@ function HeroSection() {
             <FadeIn>
               <div className="flex items-center gap-3 mb-3">
                 <a href="https://www.flyingcloudtech.com" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 hover:opacity-80 transition-opacity" data-testid="link-hero-fct">
-                  <FlyingCloudLogo size={48} />
+                  <FlyingCloudLogo size={80} />
                   <span className="text-xs text-muted-foreground font-medium">A Flying Cloud Technology Project</span>
                 </a>
               </div>
@@ -1859,7 +1859,7 @@ function Footer() {
           <div className="col-span-2 md:col-span-1 space-y-4">
             <div className="space-y-3">
               <div className="flex items-center gap-2">
-                <FlyingCloudLogo size={52} />
+                <FlyingCloudLogo size={84} />
                 <div className="flex flex-col leading-tight">
                   <span className="font-display font-bold tracking-tight">ForgeProof</span>
                   <span className="text-[9px] text-muted-foreground tracking-wide uppercase">by Flying Cloud Technology</span>
