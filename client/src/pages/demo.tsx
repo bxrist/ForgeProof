@@ -296,7 +296,7 @@ export default function DemoPage() {
                 AI agents can programmatically attest code via the REST API. Click any receipt above to see the full cryptographic details and download the JSON.
               </p>
             </div>
-            <a href="https://github.com" target="_blank" rel="noopener noreferrer">
+            <a href="https://github.com/bxrist/ForgeProof" target="_blank" rel="noopener noreferrer">
               <Button variant="outline" size="sm">
                 <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
                 View Source
