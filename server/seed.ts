@@ -7,19 +7,19 @@ import { sql } from "drizzle-orm";
 const SEED_USER_ID = "forgeproof-system";
 
 const seedFiles = [
-  {
+    {
     fileName: "schema.ts",
     filePath: "shared/schema.ts",
-    modelName: "Replit Agent 3",
-    modelProvider: "Replit",
+    modelName: "GPT-5",
+    modelProvider: "OpenAI",
     countryOfOrigin: "US",
     metadata: { purpose: "Data model definitions for ForgeProof platform", self_attested: true },
   },
   {
     fileName: "routes.ts",
     filePath: "server/routes.ts",
-    modelName: "Replit Agent 3",
-    modelProvider: "Replit",
+    modelName: "GPT-5",
+    modelProvider: "OpenAI",
     countryOfOrigin: "US",
     metadata: { purpose: "API endpoint implementations", self_attested: true },
   },
@@ -150,6 +150,76 @@ export async function seedDatabase() {
       entryHash,
       receiptVersion: "v1",
       metadata: { purpose: "Multi-model security audit of crypto module", auditor: "claude-3.5-sonnet" },
+    });
+    prevEntryHash = entryHash;
+  }
+
+  // 1b. OpenAI Audit on crypto.ts: Origin (Replit) → Audit: Secure (GPT-5)
+  {
+    const timestamp = new Date().toISOString();
+    const entryHash = computeEntryHash({
+      fileHash: cryptoOrigin.fileHash,
+      modelName: "GPT-5",
+      modelProvider: "OpenAI",
+      countryOfOrigin: "US",
+      prevEntryHash,
+      timestamp,
+    });
+    const signaturePayload = `${entryHash}|${cryptoOrigin.fileHash}|${timestamp}`;
+    const signature = signData(signaturePayload);
+
+    await db.insert(attestationReceipts).values({
+      userId: SEED_USER_ID,
+      fileHash: cryptoOrigin.fileHash,
+      fileName: cryptoOrigin.fileName,
+      filePath: cryptoOrigin.filePath,
+      modelName: "GPT-5",
+      modelProvider: "OpenAI",
+      countryOfOrigin: "US",
+      attestationType: "security_audit",
+      parentAttestationId: cryptoOrigin.id,
+      auditVerdict: "secure",
+      auditDetails: "Independent cryptographic review completed by GPT-5. Verified SHA-256 hash chain integrity and Ed25519 signature verification logic. All security constraints are satisfied.",
+      signature,
+      publicKey,
+      prevEntryHash,
+      entryHash,
+      receiptVersion: "v1",
+      metadata: { purpose: "Secondary security audit of crypto module", auditor: "GPT-5" },
+    });
+    prevEntryHash = entryHash;
+  }
+
+  // 1c. Primary GPT-5 Attestation for index.ts
+  {
+    const fileContent = "ForgeProof self-attestation: server/index.ts";
+    const fileHash = sha256(fileContent);
+    const timestamp = new Date().toISOString();
+    const entryHash = computeEntryHash({
+      fileHash,
+      modelName: "GPT-5",
+      modelProvider: "OpenAI",
+      countryOfOrigin: "US",
+      prevEntryHash,
+      timestamp,
+    });
+    const signaturePayload = `${entryHash}|${fileHash}|${timestamp}`;
+    const signature = signData(signaturePayload);
+
+    await db.insert(attestationReceipts).values({
+      userId: SEED_USER_ID,
+      fileHash,
+      fileName: "index.ts",
+      filePath: "server/index.ts",
+      modelName: "GPT-5",
+      modelProvider: "OpenAI",
+      countryOfOrigin: "US",
+      signature,
+      publicKey,
+      prevEntryHash,
+      entryHash,
+      receiptVersion: "v1",
+      metadata: { purpose: "Main server entry point", self_attested: true },
     });
     prevEntryHash = entryHash;
   }

@@ -66,6 +66,7 @@ export interface IStorage {
   createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
   getAuditLogs(userId?: string, limit?: number): Promise<AuditLog[]>;
   getAuditLogsByResource(resourceType: string, resourceId: string): Promise<AuditLog[]>;
+  clearAllAttestations(): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -253,6 +254,10 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(auditLogs).where(
       and(eq(auditLogs.resourceType, resourceType), eq(auditLogs.resourceId, resourceId))
     ).orderBy(desc(auditLogs.createdAt));
+  }
+
+  async clearAllAttestations(): Promise<void> {
+    await db.delete(attestationReceipts);
   }
 }
 

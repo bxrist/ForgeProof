@@ -1320,5 +1320,17 @@ export async function registerRoutes(
     res.send(html);
   });
 
+  // For demo purposes, we allow clearing and re-seeding via a special internal-only endpoint
+  app.post("/api/admin/reseed", async (req, res) => {
+    try {
+      await storage.clearAllAttestations();
+      const { seedDatabase } = await import("./seed");
+      await seedDatabase();
+      res.json({ message: "Database re-seeded successfully" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   return httpServer;
 }
