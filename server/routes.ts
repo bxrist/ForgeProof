@@ -151,6 +151,7 @@ async function createAttestationReceipt(
     prevEntryHash,
     entryHash,
     receiptVersion: "v1",
+    signedAt: timestamp,
     metadata: data.metadata || null,
   });
 }
@@ -509,6 +510,7 @@ export async function registerRoutes(
             signature,
             publicKey: keyPair.publicKey,
             receiptVersion: "v1",
+            signedAt: timestamp,
             userId: "webhook",
             metadata: { commitSha: commit.id, commitMessage: commit.message, author: commit.author?.name },
           });
@@ -864,7 +866,7 @@ export async function registerRoutes(
       const expectedPrev = prevHash;
       const chainValid = entry.prevEntryHash === expectedPrev;
 
-      const timestamp = entry.createdAt ? new Date(entry.createdAt).toISOString() : new Date().toISOString();
+      const timestamp = entry.signedAt || (entry.createdAt ? new Date(entry.createdAt).toISOString() : new Date().toISOString());
       const recomputedHash = computeEntryHash({
         fileHash: entry.fileHash,
         modelName: entry.modelName,
@@ -905,7 +907,7 @@ export async function registerRoutes(
     const entry = await storage.getAttestation(id);
     if (!entry) return res.status(404).json({ message: "Not found" });
 
-    const timestamp = entry.createdAt ? new Date(entry.createdAt).toISOString() : new Date().toISOString();
+    const timestamp = entry.signedAt || (entry.createdAt ? new Date(entry.createdAt).toISOString() : new Date().toISOString());
     const recomputedHash = computeEntryHash({
       fileHash: entry.fileHash,
       modelName: entry.modelName,

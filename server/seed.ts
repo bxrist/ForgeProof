@@ -52,8 +52,10 @@ const seedFiles = [
 export async function seedDatabase() {
   const existing = await db.select({ count: sql<number>`count(*)` }).from(attestationReceipts);
   const hasMultiModel = await db.select({ count: sql<number>`count(*)` }).from(attestationReceipts).where(sql`attestation_type = 'security_audit'`);
+  const existingCount = Number(existing[0].count);
+  const multiModelCount = Number(hasMultiModel[0].count);
   
-  if (existing[0].count > 0 && hasMultiModel[0].count > 0) {
+  if (existingCount > 0 && multiModelCount > 0) {
     console.log("Seed data already exists, skipping...");
     return;
   }
@@ -64,7 +66,7 @@ export async function seedDatabase() {
 
   const createdAttestations: Array<{ id: number; fileHash: string; fileName: string; filePath: string; entryHash: string }> = [];
 
-  if (existing[0].count === 0) {
+  if (existingCount === 0) {
     console.log("Seeding database with self-attesting receipts...");
     for (const file of seedFiles) {
     const fileContent = `ForgeProof self-attestation: ${file.filePath}`;
@@ -96,6 +98,7 @@ export async function seedDatabase() {
       prevEntryHash,
       entryHash,
       receiptVersion: "v1",
+      signedAt: timestamp,
       metadata: file.metadata,
     }).returning();
 
@@ -149,6 +152,7 @@ export async function seedDatabase() {
       prevEntryHash,
       entryHash,
       receiptVersion: "v1",
+      signedAt: timestamp,
       metadata: { purpose: "Multi-model security audit of crypto module", auditor: "claude-3.5-sonnet" },
     });
     prevEntryHash = entryHash;
@@ -185,6 +189,7 @@ export async function seedDatabase() {
       prevEntryHash,
       entryHash,
       receiptVersion: "v1",
+      signedAt: timestamp,
       metadata: { purpose: "Secondary security audit of crypto module", auditor: "GPT-5" },
     });
     prevEntryHash = entryHash;
@@ -219,6 +224,7 @@ export async function seedDatabase() {
       prevEntryHash,
       entryHash,
       receiptVersion: "v1",
+      signedAt: timestamp,
       metadata: { purpose: "Main server entry point", self_attested: true },
     });
     prevEntryHash = entryHash;
@@ -256,6 +262,7 @@ export async function seedDatabase() {
       prevEntryHash,
       entryHash,
       receiptVersion: "v1",
+      signedAt: timestamp,
       metadata: { purpose: "Multi-model security audit of routes module", auditor: "claude-3.5-sonnet" },
     }).returning();
     flaggedAuditId = flaggedAudit.id;
@@ -294,6 +301,7 @@ export async function seedDatabase() {
       prevEntryHash,
       entryHash,
       receiptVersion: "v1",
+      signedAt: timestamp,
       metadata: { purpose: "Remediation of flagged security issue in routes module", auditor: "claude-3.5-sonnet" },
     });
     prevEntryHash = entryHash;
