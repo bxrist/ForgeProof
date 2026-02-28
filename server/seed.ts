@@ -51,13 +51,26 @@ const seedFiles = [
 
 export async function seedDatabase() {
   const existing = await db.select({ count: sql<number>`count(*)` }).from(attestationReceipts);
-  const hasMultiModel = await db.select({ count: sql<number>`count(*)` }).from(attestationReceipts).where(sql`attestation_type = 'security_audit'`);
   const existingCount = Number(existing[0].count);
-  const multiModelCount = Number(hasMultiModel[0].count);
-  
-  if (existingCount > 0 && multiModelCount > 0) {
-    console.log("Seed data already exists, skipping...");
-    return;
+
+  if (existingCount > 0) {
+    const staleCheck = await db.select({ count: sql<number>`count(*)` }).from(attestationReceipts).where(sql`signed_at IS NULL AND user_id = 'forgeproof-system'`);
+    const staleCount = Number(staleCheck[0].count);
+    if (staleCount > 0) {
+      console.log(`Found ${staleCount} stale seed attestations without signedAt. Clearing and re-seeding...`);
+      await db.delete(attestationReceipts).where(sql`user_id = 'forgeproof-system'`);
+    } else {
+      const hasMultiModel = await db.select({ count: sql<number>`count(*)` }).from(attestationReceipts).where(sql`attestation_type = 'security_audit'`);
+      const multiModelCount = Number(hasMultiModel[0].count);
+      const hasOpenAI = await db.select({ count: sql<number>`count(*)` }).from(attestationReceipts).where(sql`model_provider = 'OpenAI' AND user_id = 'forgeproof-system'`);
+      const openAICount = Number(hasOpenAI[0].count);
+      if (multiModelCount > 0 && openAICount > 0) {
+        console.log("Seed data already exists with signedAt and OpenAI entries, skipping...");
+        return;
+      }
+      console.log("Seed data missing OpenAI entries. Clearing and re-seeding...");
+      await db.delete(attestationReceipts).where(sql`user_id = 'forgeproof-system'`);
+    }
   }
 
   const { publicKey } = getKeyPair();
@@ -66,9 +79,8 @@ export async function seedDatabase() {
 
   const createdAttestations: Array<{ id: number; fileHash: string; fileName: string; filePath: string; entryHash: string }> = [];
 
-  if (existingCount === 0) {
-    console.log("Seeding database with self-attesting receipts...");
-    for (const file of seedFiles) {
+  console.log("Seeding database with self-attesting receipts...");
+  for (const file of seedFiles) {
     const fileContent = `ForgeProof self-attestation: ${file.filePath}`;
     const fileHash = sha256(fileContent);
     const timestamp = new Date().toISOString();
@@ -102,17 +114,10 @@ export async function seedDatabase() {
       metadata: file.metadata,
     }).returning();
 
-      createdAttestations.push({ id: created.id, fileHash, fileName: file.fileName, filePath: file.filePath, entryHash });
-      prevEntryHash = entryHash;
-    }
-    console.log(`Seeded ${seedFiles.length} self-attesting receipts.`);
-  } else {
-    const allAttestations = await storage.getAllAttestationsOrdered();
-    for (const a of allAttestations) {
-      createdAttestations.push({ id: a.id, fileHash: a.fileHash, fileName: a.fileName, filePath: a.filePath, entryHash: a.entryHash });
-    }
-    console.log("Origin seed data exists. Adding multi-model attestation examples...");
+    createdAttestations.push({ id: created.id, fileHash, fileName: file.fileName, filePath: file.filePath, entryHash });
+    prevEntryHash = entryHash;
   }
+  console.log(`Seeded ${seedFiles.length} self-attesting receipts.`);
 
   const cryptoOrigin = createdAttestations.find(a => a.fileName === "crypto.ts")!;
   const routesOrigin = createdAttestations.find(a => a.fileName === "routes.ts")!;
