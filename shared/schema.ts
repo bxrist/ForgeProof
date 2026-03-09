@@ -77,6 +77,22 @@ export const orgMembers = pgTable("org_members", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const subscriptions = pgTable("subscriptions", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull(),
+  orgId: integer("org_id"),
+  stripeCustomerId: varchar("stripe_customer_id"),
+  stripeSubscriptionId: varchar("stripe_subscription_id"),
+  plan: varchar("plan").notNull().default("free"),
+  status: varchar("status").notNull().default("active"),
+  currentPeriodStart: timestamp("current_period_start"),
+  currentPeriodEnd: timestamp("current_period_end"),
+  attestationLimit: integer("attestation_limit").notNull().default(100),
+  attestationCount: integer("attestation_count").notNull().default(0),
+  apiKeyLimit: integer("api_key_limit").notNull().default(1),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const auditLogs = pgTable("audit_logs", {
   id: serial("id").primaryKey(),
   userId: varchar("user_id"),
@@ -88,12 +104,18 @@ export const auditLogs = pgTable("audit_logs", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const subscriptionsRelations = relations(subscriptions, ({ one }) => ({
+  user: one(users, { fields: [subscriptions.userId], references: [users.id] }),
+  organization: one(organizations, { fields: [subscriptions.orgId], references: [organizations.id] }),
+}));
+
 export const usersRelations = relations(users, ({ many }) => ({
   repositories: many(repositories),
   attestationReceipts: many(attestationReceipts),
   apiKeys: many(apiKeys),
   ownedOrganizations: many(organizations),
   orgMemberships: many(orgMembers),
+  subscriptions: many(subscriptions),
 }));
 
 export const repositoriesRelations = relations(repositories, ({ one, many }) => ({
@@ -156,6 +178,19 @@ export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({
   createdAt: true,
 });
 
+export const insertSubscriptionSchema = createInsertSchema(subscriptions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const PLAN_LIMITS = {
+  free: { attestationLimit: 100, apiKeyLimit: 1, teamMembers: 1 },
+  pro: { attestationLimit: 10000, apiKeyLimit: 10, teamMembers: 10 },
+  enterprise: { attestationLimit: -1, apiKeyLimit: -1, teamMembers: -1 },
+} as const;
+
+export type PlanType = "free" | "pro" | "enterprise";
+
 export type InsertRepository = z.infer<typeof insertRepositorySchema>;
 export type Repository = typeof repositories.$inferSelect;
 
@@ -173,3 +208,6 @@ export type OrgMember = typeof orgMembers.$inferSelect;
 
 export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
 export type AuditLog = typeof auditLogs.$inferSelect;
+
+export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;
+export type Subscription = typeof subscriptions.$inferSelect;

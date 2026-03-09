@@ -6,6 +6,8 @@ import {
   organizations,
   orgMembers,
   auditLogs,
+  subscriptions,
+  PLAN_LIMITS,
   type InsertRepository,
   type Repository,
   type InsertAttestationReceipt,
@@ -18,10 +20,13 @@ import {
   type OrgMember,
   type InsertAuditLog,
   type AuditLog,
+  type InsertSubscription,
+  type Subscription,
+  type PlanType,
 } from "@shared/schema";
 import type { User } from "@shared/models/auth";
 import { db } from "./db";
-import { eq, desc, and, or, asc } from "drizzle-orm";
+import { eq, desc, and, or, asc, sql } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -67,6 +72,15 @@ export interface IStorage {
   getAuditLogs(userId?: string, limit?: number): Promise<AuditLog[]>;
   getAuditLogsByResource(resourceType: string, resourceId: string): Promise<AuditLog[]>;
   clearAllAttestations(): Promise<void>;
+
+  getSubscription(userId: string): Promise<Subscription | undefined>;
+  getSubscriptionByStripeId(stripeSubscriptionId: string): Promise<Subscription | undefined>;
+  getSubscriptionByCustomerId(stripeCustomerId: string): Promise<Subscription | undefined>;
+  createSubscription(sub: InsertSubscription): Promise<Subscription>;
+  updateSubscription(id: number, data: Partial<InsertSubscription>): Promise<void>;
+  incrementAttestationCount(userId: string): Promise<void>;
+  resetAttestationCount(subscriptionId: number): Promise<void>;
+  getOrCreateFreeSubscription(userId: string): Promise<Subscription>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -258,6 +272,62 @@ export class DatabaseStorage implements IStorage {
 
   async clearAllAttestations(): Promise<void> {
     await db.delete(attestationReceipts);
+  }
+
+  async getSubscription(userId: string): Promise<Subscription | undefined> {
+    const [sub] = await db.select().from(subscriptions).where(eq(subscriptions.userId, userId));
+    return sub || undefined;
+  }
+
+  async getSubscriptionByStripeId(stripeSubscriptionId: string): Promise<Subscription | undefined> {
+    const [sub] = await db.select().from(subscriptions).where(eq(subscriptions.stripeSubscriptionId, stripeSubscriptionId));
+    return sub || undefined;
+  }
+
+  async getSubscriptionByCustomerId(stripeCustomerId: string): Promise<Subscription | undefined> {
+    const [sub] = await db.select().from(subscriptions).where(eq(subscriptions.stripeCustomerId, stripeCustomerId));
+    return sub || undefined;
+  }
+
+  async createSubscription(sub: InsertSubscription): Promise<Subscription> {
+    const [created] = await db.insert(subscriptions).values(sub).returning();
+    return created;
+  }
+
+  async updateSubscription(id: number, data: Partial<InsertSubscription>): Promise<void> {
+    await db.update(subscriptions).set(data).where(eq(subscriptions.id, id));
+  }
+
+  async incrementAttestationCount(userId: string): Promise<void> {
+    await db.update(subscriptions)
+      .set({ attestationCount: sql`${subscriptions.attestationCount} + 1` })
+      .where(eq(subscriptions.userId, userId));
+  }
+
+  async resetAttestationCount(subscriptionId: number): Promise<void> {
+    await db.update(subscriptions)
+      .set({ attestationCount: 0 })
+      .where(eq(subscriptions.id, subscriptionId));
+  }
+
+  async getOrCreateFreeSubscription(userId: string): Promise<Subscription> {
+    const existing = await this.getSubscription(userId);
+    if (existing) return existing;
+
+    const now = new Date();
+    const periodEnd = new Date(now);
+    periodEnd.setMonth(periodEnd.getMonth() + 1);
+
+    return this.createSubscription({
+      userId,
+      plan: "free",
+      status: "active",
+      attestationLimit: PLAN_LIMITS.free.attestationLimit,
+      attestationCount: 0,
+      apiKeyLimit: PLAN_LIMITS.free.apiKeyLimit,
+      currentPeriodStart: now,
+      currentPeriodEnd: periodEnd,
+    });
   }
 }
 

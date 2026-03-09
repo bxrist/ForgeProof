@@ -2,11 +2,15 @@ import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
 import rateLimit from "express-rate-limit";
 import { storage } from "./storage";
+import { pool } from "./db";
 import { setupAuth, isAuthenticated } from "./replit_integrations/auth/replitAuth";
 import { sha256, signData, getKeyPair, computeEntryHash, generateApiKey, verifySignature } from "./crypto";
 import { fetchUserRepos, fetchRepoFiles, fetchFileContent, fetchRepoCommits, fetchCommitFiles } from "./github";
 import { z } from "zod";
 import { getMcpManifest, handleMcpTool } from "./mcp";
+import { attestationReceipts } from "@shared/schema";
+import { desc } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
 
 const publicApiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -106,6 +110,9 @@ async function authenticateApiKey(req: Request): Promise<string | null> {
   return apiKey.userId;
 }
 
+const ADVISORY_LOCK_ID = 7329105;
+const MAX_RETRIES = 3;
+
 async function createAttestationReceipt(
   userId: string,
   data: { file_path: string; file_hash: string; file_name?: string; model_name: string; model_provider: string; country_of_origin: string; metadata?: any; attestation_type?: string; parent_attestation_id?: number; audit_verdict?: string; audit_details?: string },
@@ -113,47 +120,108 @@ async function createAttestationReceipt(
   repositoryId?: number
 ) {
   const fileName = data.file_name || data.file_path.split("/").pop() || "unknown";
-  const timestamp = new Date().toISOString();
-  const latest = await storage.getLatestAttestation();
-  const prevEntryHash = latest?.entryHash || null;
-
-  const entryHash = computeEntryHash({
-    fileHash: data.file_hash,
-    modelName: data.model_name,
-    modelProvider: data.model_provider,
-    countryOfOrigin: data.country_of_origin,
-    prevEntryHash,
-    timestamp,
-  });
-
-  const signaturePayload = `${entryHash}|${data.file_hash}|${timestamp}`;
-  const signature = signData(signaturePayload);
   const { publicKey } = getKeyPair();
   const complianceStatus = computeComplianceStatus(data.country_of_origin, detectedCountry);
 
-  return storage.createAttestation({
-    userId,
-    repositoryId: repositoryId || null,
-    fileHash: data.file_hash,
-    fileName,
-    filePath: data.file_path,
-    modelName: data.model_name,
-    modelProvider: data.model_provider,
-    countryOfOrigin: data.country_of_origin,
-    detectedCountry,
-    complianceStatus,
-    attestationType: data.attestation_type || "origin",
-    parentAttestationId: data.parent_attestation_id || null,
-    auditVerdict: data.audit_verdict || null,
-    auditDetails: data.audit_details || null,
-    signature,
-    publicKey,
-    prevEntryHash,
-    entryHash,
-    receiptVersion: "v1",
-    signedAt: timestamp,
-    metadata: data.metadata || null,
-  });
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`SELECT pg_advisory_xact_lock(${ADVISORY_LOCK_ID})`);
+
+      const latestResult = await client.query(
+        `SELECT entry_hash FROM attestation_receipts ORDER BY id DESC LIMIT 1`
+      );
+      const prevEntryHash = latestResult.rows.length > 0 ? latestResult.rows[0].entry_hash : null;
+
+      const timestamp = new Date().toISOString();
+      const entryHash = computeEntryHash({
+        fileHash: data.file_hash,
+        modelName: data.model_name,
+        modelProvider: data.model_provider,
+        countryOfOrigin: data.country_of_origin,
+        prevEntryHash,
+        timestamp,
+      });
+
+      const signaturePayload = `${entryHash}|${data.file_hash}|${timestamp}`;
+      const signature = signData(signaturePayload);
+
+      const insertResult = await client.query(
+        `INSERT INTO attestation_receipts (
+          user_id, repository_id, file_hash, file_name, file_path,
+          model_name, model_provider, country_of_origin, detected_country, compliance_status,
+          attestation_type, parent_attestation_id, audit_verdict, audit_details,
+          signature, public_key, prev_entry_hash, entry_hash,
+          receipt_version, signed_at, metadata
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+        RETURNING *`,
+        [
+          userId,
+          repositoryId || null,
+          data.file_hash,
+          fileName,
+          data.file_path,
+          data.model_name,
+          data.model_provider,
+          data.country_of_origin,
+          detectedCountry,
+          complianceStatus,
+          data.attestation_type || "origin",
+          data.parent_attestation_id || null,
+          data.audit_verdict || null,
+          data.audit_details || null,
+          signature,
+          publicKey,
+          prevEntryHash,
+          entryHash,
+          "v1",
+          timestamp,
+          data.metadata ? JSON.stringify(data.metadata) : null,
+        ]
+      );
+
+      await client.query("COMMIT");
+
+      const row = insertResult.rows[0];
+      return {
+        id: row.id,
+        userId: row.user_id,
+        orgId: row.org_id,
+        repositoryId: row.repository_id,
+        fileHash: row.file_hash,
+        fileName: row.file_name,
+        filePath: row.file_path,
+        modelName: row.model_name,
+        modelProvider: row.model_provider,
+        countryOfOrigin: row.country_of_origin,
+        detectedCountry: row.detected_country,
+        complianceStatus: row.compliance_status,
+        attestationType: row.attestation_type,
+        parentAttestationId: row.parent_attestation_id,
+        auditVerdict: row.audit_verdict,
+        auditDetails: row.audit_details,
+        signature: row.signature,
+        publicKey: row.public_key,
+        prevEntryHash: row.prev_entry_hash,
+        entryHash: row.entry_hash,
+        receiptVersion: row.receipt_version,
+        signedAt: row.signed_at,
+        metadata: row.metadata,
+        createdAt: row.created_at,
+      };
+    } catch (err: any) {
+      await client.query("ROLLBACK");
+      if (err.code === "40001" && attempt < MAX_RETRIES - 1) {
+        await new Promise(resolve => setTimeout(resolve, 50 * (attempt + 1)));
+        continue;
+      }
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+  throw new Error("Failed to create attestation after maximum retries");
 }
 
 export async function registerRoutes(
