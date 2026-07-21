@@ -304,6 +304,130 @@ Input: {
   "auditDetails": "No vulnerabilities found."
 }`;
 
+const agentsPythonCode = `import hashlib
+import requests
+
+def attest_file(file_path, file_content, model_name, model_provider,
+                api_key, country="US", attestation_type="origin"):
+    file_hash = "sha256:" + hashlib.sha256(file_content).hexdigest()
+    resp = requests.post(
+        "https://forgeproof.flyingcloudtech.com/api/v1/attest",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json={
+            "file_path": file_path,
+            "file_hash": file_hash,
+            "model_name": model_name,
+            "model_provider": model_provider,
+            "country_of_origin": country,
+            "attestation_type": attestation_type,
+        },
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+receipt = attest_file(
+    file_path="src/utils/auth.ts",
+    file_content=open("src/utils/auth.ts", "rb").read(),
+    model_name="claude-sonnet-4-5",
+    model_provider="Anthropic",
+    api_key="fp_sk_your_key_here",
+)
+print(receipt["id"], receipt["entry_hash"])`;
+
+const agentsTypescriptCode = `import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+
+async function attestFile(
+  filePath: string, modelName: string, modelProvider: string,
+  apiKey: string, country = "US", attestationType = "origin",
+) {
+  const fileHash = "sha256:" + createHash("sha256")
+    .update(readFileSync(filePath)).digest("hex");
+
+  const res = await fetch("https://forgeproof.flyingcloudtech.com/api/v1/attest", {
+    method: "POST",
+    headers: { Authorization: \`Bearer \${apiKey}\`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      file_path: filePath, file_hash: fileHash,
+      model_name: modelName, model_provider: modelProvider,
+      country_of_origin: country, attestation_type: attestationType,
+    }),
+  });
+  if (!res.ok) throw new Error(\`ForgeProof error: \${res.status}\`);
+  return res.json();
+}
+
+const receipt = await attestFile(
+  "src/utils/auth.ts", "gpt-4o", "OpenAI", "fp_sk_your_key_here"
+);
+console.log(receipt.id, receipt.entry_hash);`;
+
+const agentsMcpCode = `{
+  "tool": "forgeproof_attest",
+  "input": {
+    "file_path": "src/utils/auth.ts",
+    "file_hash": "sha256:a3f2e8c1...",
+    "model_name": "claude-sonnet-4-5",
+    "model_provider": "Anthropic",
+    "country_of_origin": "US",
+    "attestation_type": "origin"
+  }
+}`;
+
+const agentsCurlCode = `curl -X POST https://forgeproof.flyingcloudtech.com/api/v1/attest \\
+  -H "Authorization: Bearer $FORGEPROOF_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "file_path": "src/utils/auth.ts",
+    "file_hash": "sha256:a3f2e8c1...",
+    "model_name": "gpt-4o",
+    "model_provider": "OpenAI",
+    "country_of_origin": "US",
+    "attestation_type": "origin"
+  }'`;
+
+const agentsGitHubActionsCode = `# .github/workflows/forgeproof.yml
+name: ForgeProof Attestation
+on:
+  push:
+    branches: [main]
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Attest changed files
+        env:
+          FORGEPROOF_API_KEY: \${{ secrets.FORGEPROOF_API_KEY }}
+          MODEL_NAME: \${{ vars.AI_MODEL_NAME || 'gpt-4o' }}
+          MODEL_PROVIDER: \${{ vars.AI_MODEL_PROVIDER || 'OpenAI' }}
+        run: |
+          git diff --name-only HEAD~1 HEAD > changed_files.txt
+          while IFS= read -r file; do
+            [ -f "$file" ] || continue
+            FILE_HASH="sha256:$(sha256sum "$file" | awk '{print $1}')"
+            curl -sf -X POST https://forgeproof.flyingcloudtech.com/api/v1/attest \\
+              -H "Authorization: Bearer $FORGEPROOF_API_KEY" \\
+              -H "Content-Type: application/json" \\
+              -d "{\\"file_path\\":\\"$file\\",\\"file_hash\\":\\"$FILE_HASH\\",\\"model_name\\":\\"$MODEL_NAME\\",\\"model_provider\\":\\"$MODEL_PROVIDER\\",\\"country_of_origin\\":\\"US\\",\\"attestation_type\\":\\"origin\\"}"
+          done < changed_files.txt`;
+
+const agentsPreCommitCode = `#!/bin/sh
+# .git/hooks/pre-commit  (chmod +x .git/hooks/pre-commit)
+API_KEY="\${FORGEPROOF_API_KEY}"
+MODEL_NAME="\${FORGEPROOF_MODEL_NAME:-gpt-4o}"
+MODEL_PROVIDER="\${FORGEPROOF_MODEL_PROVIDER:-OpenAI}"
+
+git diff --cached --name-only --diff-filter=ACM | while IFS= read -r file; do
+  [ -f "$file" ] || continue
+  FILE_HASH="sha256:$(sha256sum "$file" | awk '{print $1}')"
+  curl -sf -X POST https://forgeproof.flyingcloudtech.com/api/v1/attest \\
+    -H "Authorization: Bearer $API_KEY" \\
+    -H "Content-Type: application/json" \\
+    -d "{\\"file_path\\":\\"$file\\",\\"file_hash\\":\\"$FILE_HASH\\",\\"model_name\\":\\"$MODEL_NAME\\",\\"model_provider\\":\\"$MODEL_PROVIDER\\",\\"country_of_origin\\":\\"US\\",\\"attestation_type\\":\\"origin\\"}" \\
+    || echo "ForgeProof: attestation failed for $file (non-fatal)" >&2
+done`;
+
 type Tab = "python" | "typescript" | "curl";
 
 function CodeBlock({ code, label }: { code: string; label: string }) {
@@ -785,6 +909,176 @@ export default function SdkPage() {
               </div>
             </div>
           </Card>
+        </div>
+
+        <div className="mt-20 mb-12" id="agents-md" data-testid="section-agents-md">
+          <Badge variant="outline" className="mb-4">
+            <Bot className="w-3 h-3 mr-1" />
+            Agent Integration
+          </Badge>
+          <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight mb-3" data-testid="heading-agents-md">
+            AGENTS.md — Agent-Ready by Default
+          </h2>
+          <p className="text-base text-muted-foreground max-w-2xl mb-2">
+            ForgeProof ships an <code className="text-xs bg-muted px-1.5 py-0.5 rounded">AGENTS.md</code> file in the repository root. This is an emerging convention that tells AI coding agents — Claude, Cursor, Copilot, GPT, Gemini, and others — how to record their code-generation activity in ForgeProof automatically, without any manual setup.
+          </p>
+          <a
+            href="https://github.com/bxrist/ForgeProof/blob/main/AGENTS.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline mb-8"
+            data-testid="link-agents-md-github"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+            View AGENTS.md on GitHub
+          </a>
+
+          <div className="space-y-6 mt-6">
+            <Card className="p-6 sm:p-8" data-testid="card-agents-attest">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 rounded-md bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                  <Terminal className="w-5 h-5 text-primary" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-display text-lg font-semibold mb-2">Attest a File — Quick Start</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                    After generating or modifying a file, compute its SHA-256 hash and call <code className="text-xs bg-muted px-1.5 py-0.5 rounded">POST /api/v1/attest</code> with your model identity and API key. Examples in curl, Python, and TypeScript:
+                  </p>
+                  <div className="space-y-4">
+                    <CodeBlock code={agentsCurlCode} label="terminal" />
+                    <CodeBlock code={agentsPythonCode} label="attest_file.py" />
+                    <CodeBlock code={agentsTypescriptCode} label="attestFile.ts" />
+                  </div>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="p-6 sm:p-8" data-testid="card-agents-mcp">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 rounded-md bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                  <Bot className="w-5 h-5 text-primary" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-display text-lg font-semibold mb-2">MCP Tool Server</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed mb-3">
+                    If your agent runtime supports MCP, add the ForgeProof manifest URL and attestation tools appear automatically — no manual API calls needed.
+                  </p>
+                  <div className="mb-4 p-3 rounded-md bg-muted/50 text-sm font-mono break-all">
+                    https://forgeproof.flyingcloudtech.com/api/mcp/manifest
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-3">Example <code className="text-xs bg-muted px-1.5 py-0.5 rounded">forgeproof_attest</code> tool call:</p>
+                  <CodeBlock code={agentsMcpCode} label="mcp-tool-call.json" />
+                  <div className="mt-4 space-y-1.5">
+                    {[
+                      ["forgeproof_attest", "Attest a single file with Ed25519 signing"],
+                      ["forgeproof_batch_attest", "Attest multiple files in one call"],
+                      ["forgeproof_audit_attest", "Security audit by a different provider"],
+                      ["forgeproof_lookup", "Look up a receipt by ID or hash"],
+                      ["forgeproof_verify_chain", "Verify the entire hash chain"],
+                    ].map(([tool, desc]) => (
+                      <div key={tool} className="flex items-start gap-2.5 text-sm">
+                        <code className="text-xs bg-muted px-1.5 py-0.5 rounded shrink-0 mt-0.5">{tool}</code>
+                        <span className="text-muted-foreground">{desc}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="p-6 sm:p-8" data-testid="card-agents-ci">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 rounded-md bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                  <Shield className="w-5 h-5 text-primary" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-display text-lg font-semibold mb-2">GitHub Actions CI Step</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                    Add a workflow step that attests every changed file on each push. Store your API key as the repository secret <code className="text-xs bg-muted px-1.5 py-0.5 rounded">FORGEPROOF_API_KEY</code> and set <code className="text-xs bg-muted px-1.5 py-0.5 rounded">AI_MODEL_NAME</code> / <code className="text-xs bg-muted px-1.5 py-0.5 rounded">AI_MODEL_PROVIDER</code> as repository variables.
+                  </p>
+                  <CodeBlock code={agentsGitHubActionsCode} label="forgeproof.yml" />
+                </div>
+              </div>
+            </Card>
+
+            <Card className="p-6 sm:p-8" data-testid="card-agents-precommit">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 rounded-md bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                  <Layers className="w-5 h-5 text-primary" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-display text-lg font-semibold mb-2">Pre-commit Hook</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                    Install a git pre-commit hook to attest staged files locally before every commit. Set <code className="text-xs bg-muted px-1.5 py-0.5 rounded">FORGEPROOF_API_KEY</code>, <code className="text-xs bg-muted px-1.5 py-0.5 rounded">FORGEPROOF_MODEL_NAME</code>, and <code className="text-xs bg-muted px-1.5 py-0.5 rounded">FORGEPROOF_MODEL_PROVIDER</code> in your shell environment.
+                  </p>
+                  <CodeBlock code={agentsPreCommitCode} label=".git/hooks/pre-commit" />
+                </div>
+              </div>
+            </Card>
+
+            <Card className="p-6 sm:p-8" data-testid="card-agents-receipt">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 rounded-md bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                  <Layers className="w-5 h-5 text-primary" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-display text-lg font-semibold mb-2">Receipt Format & Hash Chain</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                    Every attestation returns a signed JSON receipt. Key fields agents should record and surface to reviewers:
+                  </p>
+                  <div className="space-y-2">
+                    {[
+                      { field: "id", desc: "Numeric receipt identifier — include this in your response" },
+                      { field: "file_hash", desc: "sha256: prefixed hash of the file at attestation time" },
+                      { field: "entry_hash", desc: "SHA-256 fingerprint of this receipt — unique, tamper-evident" },
+                      { field: "prev_entry_hash", desc: "Links this receipt to the previous one in the hash chain" },
+                      { field: "signature", desc: "ed25519: prefixed cryptographic signature over the receipt" },
+                    ].map(({ field, desc }) => (
+                      <div key={field} className="flex items-start gap-2.5 text-sm">
+                        <code className="text-xs bg-muted px-1.5 py-0.5 rounded shrink-0 mt-0.5">{field}</code>
+                        <span className="text-muted-foreground">{desc}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-4">
+                    Full schema reference:{" "}
+                    <a href="/sdk#receipt-format" className="text-primary hover:underline">
+                      SDK Docs → Receipt Format
+                    </a>
+                    . Verify any receipt at{" "}
+                    <a href="/lookup" className="text-primary hover:underline">/lookup</a>
+                    {" "}or verify chain integrity at{" "}
+                    <a href="/verify" className="text-primary hover:underline">/verify</a>.
+                  </p>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="p-6 sm:p-8" data-testid="card-agents-guidance">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 rounded-md bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                  <Bot className="w-5 h-5 text-primary" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-display text-lg font-semibold mb-3">Guidance for AI Agents</h3>
+                  <div className="space-y-2.5">
+                    {[
+                      "Attest every file you create or modify using your model name and provider.",
+                      "Use attestation_type: \"origin\" for new files. Use \"refactor\" for rewrites of existing code.",
+                      "Prefer batch attestation (forgeproof_batch_attest via MCP) when modifying multiple files.",
+                      "Do not attest files you did not generate or modify in the current session.",
+                      "Include the receipt ID in your response so the human reviewer can verify.",
+                    ].map((rule, i) => (
+                      <div key={i} className="flex items-start gap-2.5 text-sm">
+                        <CheckCircle2 className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+                        <span className="text-muted-foreground">{rule}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </Card>
+          </div>
         </div>
       </main>
     </div>

@@ -1138,6 +1138,11 @@ function PlatformFeaturesSection() {
       title: "Audit Logging",
       desc: "Every action is logged with timestamps, user IDs, and resource details. Full activity trail for compliance and security.",
     },
+    {
+      icon: BookOpen,
+      title: "AGENTS.md Included",
+      desc: "Ships with an AGENTS.md in the repository root — the emerging convention that tells AI coding agents how to attest their own code-generation activity automatically.",
+    },
   ];
 
   return (
