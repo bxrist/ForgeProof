@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -50,6 +51,8 @@ import {
   Activity,
   Mail,
   Save,
+  CreditCard,
+  Loader2,
 } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { SEO } from "@/components/SEO";
@@ -623,6 +626,263 @@ function NotificationPreferences() {
   );
 }
 
+interface Subscription {
+  id: number;
+  userId: string;
+  plan: "free" | "pro" | "enterprise";
+  status: "active" | "past_due" | "canceled";
+  attestationLimit: number;
+  attestationCount: number;
+  apiKeyLimit: number;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  stripeSubscriptionId: string | null;
+}
+
+const PLAN_LABELS: Record<string, string> = {
+  free: "Free",
+  pro: "Pro",
+  enterprise: "Enterprise",
+};
+
+function formatBillingDate(date: string | null | undefined): string {
+  if (!date) return "—";
+  return new Date(date).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+function UsageMeter({
+  label,
+  count,
+  limit,
+  testId,
+}: {
+  label: string;
+  count: number;
+  limit: number;
+  testId: string;
+}) {
+  const unlimited = limit === -1;
+  const percent = unlimited || limit === 0 ? 0 : Math.min(100, Math.round((count / limit) * 100));
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <span className="text-sm text-muted-foreground">{label}</span>
+        <span className="text-sm font-medium" data-testid={`text-${testId}-value`}>
+          {unlimited ? `${count} / Unlimited` : `${count} / ${limit}`}
+        </span>
+      </div>
+      <Progress value={unlimited ? 0 : percent} data-testid={`progress-${testId}`} />
+    </div>
+  );
+}
+
+function UpgradePlanCard({
+  plan,
+  price,
+  features,
+  onUpgrade,
+  isPending,
+}: {
+  plan: "pro" | "enterprise";
+  price: string;
+  features: string[];
+  onUpgrade: () => void;
+  isPending: boolean;
+}) {
+  return (
+    <Card className="p-5 flex flex-col" data-testid={`card-plan-${plan}`}>
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <h4 className="font-display text-lg font-bold">{PLAN_LABELS[plan]}</h4>
+        <span className="text-sm font-semibold" data-testid={`text-price-${plan}`}>{price}</span>
+      </div>
+      <ul className="space-y-1.5 my-4 flex-1">
+        {features.map((f, i) => (
+          <li key={i} className="flex items-center gap-2 text-sm text-muted-foreground">
+            <CheckCircle2 className="w-3.5 h-3.5 text-primary shrink-0" />
+            {f}
+          </li>
+        ))}
+      </ul>
+      <Button
+        className="w-full"
+        onClick={onUpgrade}
+        disabled={isPending}
+        data-testid={`button-upgrade-${plan}`}
+      >
+        {isPending ? (
+          <>
+            <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+            Redirecting...
+          </>
+        ) : (
+          `Upgrade to ${PLAN_LABELS[plan]}`
+        )}
+      </Button>
+    </Card>
+  );
+}
+
+function BillingTab({ apiKeyCount }: { apiKeyCount: number }) {
+  const { toast } = useToast();
+
+  const { data: subscription, isLoading } = useQuery<Subscription>({
+    queryKey: ["/api/billing/subscription"],
+  });
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const billing = params.get("billing");
+    if (billing === "success") {
+      toast({ title: "Subscription activated — welcome aboard!" });
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/subscription"] });
+      params.delete("billing");
+      const search = params.toString();
+      window.history.replaceState({}, "", window.location.pathname + (search ? `?${search}` : ""));
+    } else if (billing === "canceled") {
+      toast({ title: "Checkout canceled", description: "No changes were made to your subscription." });
+      params.delete("billing");
+      const search = params.toString();
+      window.history.replaceState({}, "", window.location.pathname + (search ? `?${search}` : ""));
+    }
+  }, []);
+
+  const checkoutMutation = useMutation({
+    mutationFn: async (plan: "pro" | "enterprise") => {
+      const res = await apiRequest("POST", "/api/billing/checkout", { plan });
+      return res.json() as Promise<{ url: string }>;
+    },
+    onSuccess: (data) => {
+      if (data.url) window.location.href = data.url;
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to start checkout", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const portalMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/billing/portal");
+      return res.json() as Promise<{ url: string }>;
+    },
+    onSuccess: (data) => {
+      if (data.url) window.location.href = data.url;
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to open billing portal", description: error.message, variant: "destructive" });
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        <Card className="p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-6 w-24" />
+            <Skeleton className="h-6 w-16" />
+          </div>
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-40" />
+        </Card>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {[1, 2].map((i) => (
+            <Card key={i} className="p-5 space-y-4">
+              <Skeleton className="h-6 w-32" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-9 w-full" />
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const plan = subscription?.plan ?? "free";
+  const status = subscription?.status ?? "active";
+  const showManageBilling = plan !== "free" || !!subscription?.stripeSubscriptionId;
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-5">
+        <div className="flex items-center justify-between gap-4 flex-wrap mb-5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="font-semibold text-sm mr-1">Current Plan</h3>
+            <Badge variant="secondary" data-testid="text-current-plan">{PLAN_LABELS[plan]}</Badge>
+            <Badge
+              variant={status === "past_due" ? "destructive" : "outline"}
+              data-testid="text-subscription-status"
+            >
+              {status === "past_due" ? "Past Due" : status === "canceled" ? "Canceled" : "Active"}
+            </Badge>
+          </div>
+          {showManageBilling && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => portalMutation.mutate()}
+              disabled={portalMutation.isPending}
+              data-testid="button-manage-billing"
+            >
+              {portalMutation.isPending ? (
+                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <CreditCard className="w-3.5 h-3.5 mr-1.5" />
+              )}
+              Manage Billing
+            </Button>
+          )}
+        </div>
+
+        <div className="space-y-4 mb-5">
+          <UsageMeter
+            label="Attestations this month"
+            count={subscription?.attestationCount ?? 0}
+            limit={subscription?.attestationLimit ?? 0}
+            testId="attestation-usage"
+          />
+          <UsageMeter
+            label="API keys"
+            count={apiKeyCount}
+            limit={subscription?.apiKeyLimit ?? 0}
+            testId="apikey-usage"
+          />
+        </div>
+
+        <Separator className="my-4" />
+
+        <div className="flex items-center justify-between gap-4 flex-wrap text-sm">
+          <span className="text-muted-foreground">Billing period</span>
+          <span className="font-medium" data-testid="text-billing-period">
+            {formatBillingDate(subscription?.currentPeriodStart)} – {formatBillingDate(subscription?.currentPeriodEnd)}
+          </span>
+        </div>
+      </Card>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        {plan !== "pro" && (
+          <UpgradePlanCard
+            plan="pro"
+            price="$49/mo"
+            features={["10,000 attestations / month", "10 API keys", "Priority support"]}
+            onUpgrade={() => checkoutMutation.mutate("pro")}
+            isPending={checkoutMutation.isPending && checkoutMutation.variables === "pro"}
+          />
+        )}
+        {plan !== "enterprise" && (
+          <UpgradePlanCard
+            plan="enterprise"
+            price="$249/mo"
+            features={["Unlimited attestations", "Unlimited API keys", "Dedicated support & SLA"]}
+            onUpgrade={() => checkoutMutation.mutate("enterprise")}
+            isPending={checkoutMutation.isPending && checkoutMutation.variables === "enterprise"}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const { user, isLoading: authLoading, logout } = useAuth();
   const [, navigate] = useLocation();
@@ -844,6 +1104,10 @@ export default function DashboardPage() {
             <TabsTrigger value="teams" data-testid="tab-teams">
               <Users className="w-4 h-4 mr-1.5" />
               Teams
+            </TabsTrigger>
+            <TabsTrigger value="billing" data-testid="tab-billing">
+              <CreditCard className="w-4 h-4 mr-1.5" />
+              Billing
             </TabsTrigger>
             <TabsTrigger value="activity-log" data-testid="tab-activity-log">
               <Activity className="w-4 h-4 mr-1.5" />
@@ -1080,6 +1344,10 @@ export default function DashboardPage() {
                 />
               )}
             </Card>
+          </TabsContent>
+
+          <TabsContent value="billing">
+            <BillingTab apiKeyCount={keys?.length ?? 0} />
           </TabsContent>
 
           <TabsContent value="activity-log">

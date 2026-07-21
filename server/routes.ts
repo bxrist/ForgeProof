@@ -119,6 +119,8 @@ async function createAttestationReceipt(
   detectedCountry: string | null,
   repositoryId?: number
 ) {
+  const subscription = await storage.getOrCreateFreeSubscription(userId);
+
   const fileName = data.file_name || data.file_path.split("/").pop() || "unknown";
   const { publicKey } = getKeyPair();
   const complianceStatus = computeComplianceStatus(data.country_of_origin, detectedCountry);
@@ -128,6 +130,22 @@ async function createAttestationReceipt(
     try {
       await client.query("BEGIN");
       await client.query(`SELECT pg_advisory_xact_lock(${ADVISORY_LOCK_ID})`);
+
+      const quotaResult = await client.query(
+        `UPDATE subscriptions
+         SET attestation_count = attestation_count + 1
+         WHERE user_id = $1 AND (attestation_limit = -1 OR attestation_count < attestation_limit)
+         RETURNING id`,
+        [userId]
+      );
+      if (quotaResult.rows.length === 0) {
+        await client.query("ROLLBACK");
+        const err: any = new Error(
+          `Monthly attestation limit reached (${subscription.attestationLimit} on the ${subscription.plan} plan). Upgrade your plan to continue attesting.`
+        );
+        err.status = 402;
+        throw err;
+      }
 
       const latestResult = await client.query(
         `SELECT entry_hash FROM attestation_receipts ORDER BY id DESC LIMIT 1`
@@ -592,6 +610,49 @@ export async function registerRoutes(
     res.json({ event, status: "ignored" });
   });
 
+  // ─── Billing ──────────────────────────────────────
+  app.get("/api/billing/subscription", isAuthenticated, async (req, res) => {
+    const user = req.user as any;
+    const userId = user.claims?.sub || user.id;
+    const subscription = await storage.getOrCreateFreeSubscription(userId);
+    res.json(subscription);
+  });
+
+  app.post("/api/billing/checkout", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as any;
+      const userId = user.claims?.sub || user.id;
+      const email = user.claims?.email || user.email || null;
+      const { plan } = req.body;
+      if (plan !== "pro" && plan !== "enterprise") {
+        return res.status(400).json({ message: "Invalid plan. Choose 'pro' or 'enterprise'." });
+      }
+      const { createCheckoutSession } = await import("./stripe");
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const url = await createCheckoutSession(userId, email, plan, baseUrl);
+      if (!url) return res.status(503).json({ message: "Billing is not yet configured. Please try again later." });
+      res.json({ url });
+    } catch (error: any) {
+      console.error("Checkout error:", error);
+      res.status(500).json({ message: "Failed to create checkout session" });
+    }
+  });
+
+  app.post("/api/billing/portal", isAuthenticated, async (req, res) => {
+    try {
+      const user = req.user as any;
+      const userId = user.claims?.sub || user.id;
+      const { createPortalSession } = await import("./stripe");
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const url = await createPortalSession(userId, baseUrl);
+      if (!url) return res.status(400).json({ message: "No billing account found. Subscribe to a plan first." });
+      res.json({ url });
+    } catch (error: any) {
+      console.error("Portal error:", error);
+      res.status(500).json({ message: "Failed to open billing portal" });
+    }
+  });
+
   // ─── API Keys ─────────────────────────────────────
   app.get("/api/api-keys", isAuthenticated, async (req, res) => {
     const user = req.user as any;
@@ -608,6 +669,17 @@ export async function registerRoutes(
     }
     const user = req.user as any;
     const userId = user.claims?.sub || user.id;
+
+    const subscription = await storage.getOrCreateFreeSubscription(userId);
+    if (subscription.apiKeyLimit !== -1) {
+      const existingKeys = await storage.getApiKeys(userId);
+      if (existingKeys.length >= subscription.apiKeyLimit) {
+        return res.status(402).json({
+          message: `API key limit reached (${subscription.apiKeyLimit} on the ${subscription.plan} plan). Upgrade your plan to create more keys.`,
+        });
+      }
+    }
+
     const { fullKey, keyHash, keyPrefix } = generateApiKey();
     const apiKey = await storage.createApiKey({
       userId,
@@ -772,8 +844,12 @@ export async function registerRoutes(
     }
 
     const detectedCountry = detectCountryFromRequest(req);
-    const receipt = await createAttestationReceipt(userId, data, detectedCountry);
-    res.status(201).json(receipt);
+    try {
+      const receipt = await createAttestationReceipt(userId, data, detectedCountry);
+      res.status(201).json(receipt);
+    } catch (error: any) {
+      res.status(error.status || 500).json({ message: error.message || "Failed to create attestation" });
+    }
   });
 
   // ─── Attestation Chain ──────────────────────────────
@@ -831,21 +907,25 @@ export async function registerRoutes(
 
     const detectedCountry = detectCountryFromRequest(req);
     const receipts = [];
-    for (const file of data.files) {
-      const receipt = await createAttestationReceipt(
-        userId,
-        {
-          file_path: file.file_path,
-          file_hash: file.file_hash,
-          file_name: file.file_name,
-          model_name: data.model_name,
-          model_provider: data.model_provider,
-          country_of_origin: data.country_of_origin,
-          metadata: { ...data.metadata, agent: "openai", session_id: data.session_id },
-        },
-        detectedCountry
-      );
-      receipts.push(receipt);
+    try {
+      for (const file of data.files) {
+        const receipt = await createAttestationReceipt(
+          userId,
+          {
+            file_path: file.file_path,
+            file_hash: file.file_hash,
+            file_name: file.file_name,
+            model_name: data.model_name,
+            model_provider: data.model_provider,
+            country_of_origin: data.country_of_origin,
+            metadata: { ...data.metadata, agent: "openai", session_id: data.session_id },
+          },
+          detectedCountry
+        );
+        receipts.push(receipt);
+      }
+    } catch (error: any) {
+      return res.status(error.status || 500).json({ message: error.message || "Failed to create attestation", receipts, count: receipts.length });
     }
 
     res.status(201).json({ receipts, agent: "openai", count: receipts.length });
@@ -867,21 +947,25 @@ export async function registerRoutes(
 
     const detectedCountry = detectCountryFromRequest(req);
     const receipts = [];
-    for (const file of data.files) {
-      const receipt = await createAttestationReceipt(
-        userId,
-        {
-          file_path: file.file_path,
-          file_hash: file.file_hash,
-          file_name: file.file_name,
-          model_name: data.model_name,
-          model_provider: data.model_provider,
-          country_of_origin: data.country_of_origin,
-          metadata: { ...data.metadata, agent: "claude", session_id: data.session_id },
-        },
-        detectedCountry
-      );
-      receipts.push(receipt);
+    try {
+      for (const file of data.files) {
+        const receipt = await createAttestationReceipt(
+          userId,
+          {
+            file_path: file.file_path,
+            file_hash: file.file_hash,
+            file_name: file.file_name,
+            model_name: data.model_name,
+            model_provider: data.model_provider,
+            country_of_origin: data.country_of_origin,
+            metadata: { ...data.metadata, agent: "claude", session_id: data.session_id },
+          },
+          detectedCountry
+        );
+        receipts.push(receipt);
+      }
+    } catch (error: any) {
+      return res.status(error.status || 500).json({ message: error.message || "Failed to create attestation", receipts, count: receipts.length });
     }
 
     res.status(201).json({ receipts, agent: "claude", count: receipts.length });
@@ -903,21 +987,25 @@ export async function registerRoutes(
 
     const detectedCountry = detectCountryFromRequest(req);
     const receipts = [];
-    for (const file of data.files) {
-      const receipt = await createAttestationReceipt(
-        userId,
-        {
-          file_path: file.file_path,
-          file_hash: file.file_hash,
-          file_name: file.file_name,
-          model_name: data.model_name,
-          model_provider: data.model_provider,
-          country_of_origin: data.country_of_origin,
-          metadata: { ...data.metadata, agent: "replit", session_id: data.session_id },
-        },
-        detectedCountry
-      );
-      receipts.push(receipt);
+    try {
+      for (const file of data.files) {
+        const receipt = await createAttestationReceipt(
+          userId,
+          {
+            file_path: file.file_path,
+            file_hash: file.file_hash,
+            file_name: file.file_name,
+            model_name: data.model_name,
+            model_provider: data.model_provider,
+            country_of_origin: data.country_of_origin,
+            metadata: { ...data.metadata, agent: "replit", session_id: data.session_id },
+          },
+          detectedCountry
+        );
+        receipts.push(receipt);
+      }
+    } catch (error: any) {
+      return res.status(error.status || 500).json({ message: error.message || "Failed to create attestation", receipts, count: receipts.length });
     }
 
     res.status(201).json({ receipts, agent: "replit", count: receipts.length });

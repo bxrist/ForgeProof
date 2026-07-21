@@ -40,4 +40,4 @@ args = "npm run dev"
 waitForPort = 5000
 
 [agent]
-integrations = ["github:1.0.0", "javascript_log_in_with_replit:2.0.0", "javascript_database:1.0.0"]
+integrations = ["github:1.0.0", "javascript_log_in_with_replit:2.0.0", "javascript_database:1.0.0", "stripe:1.0.0"]

@@ -12,6 +12,36 @@ declare module "http" {
   }
 }
 
+app.post(
+  "/api/stripe/webhook",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    const signature = req.headers["stripe-signature"];
+    if (!signature) {
+      return res.status(400).json({ error: "Missing stripe-signature" });
+    }
+    try {
+      const sig = Array.isArray(signature) ? signature[0] : signature;
+      const { WebhookHandlers } = await import("./webhookHandlers");
+      await WebhookHandlers.processWebhook(req.body as Buffer, sig);
+
+      try {
+        const event = JSON.parse((req.body as Buffer).toString("utf8"));
+        const { handleStripeEvent } = await import("./stripe");
+        await handleStripeEvent(event);
+      } catch (e) {
+        console.error("Stripe event handling error:", e);
+        return res.status(500).json({ error: "Event processing failed" });
+      }
+
+      res.status(200).json({ received: true });
+    } catch (error: any) {
+      console.error("Webhook error:", error.message);
+      res.status(400).json({ error: "Webhook processing error" });
+    }
+  },
+);
+
 app.use(
   express.json({
     verify: (req, _res, buf) => {
@@ -68,6 +98,21 @@ app.use((req, res, next) => {
   } catch (e) {
     console.error("Seed error:", e);
   }
+
+  (async () => {
+    try {
+      const { runMigrations } = await import("stripe-replit-sync");
+      await runMigrations({ databaseUrl: process.env.DATABASE_URL!, schema: "stripe" });
+      const { getStripeSync } = await import("./stripeClient");
+      const stripeSync = await getStripeSync();
+      const webhookBaseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`;
+      await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/stripe/webhook`);
+      await stripeSync.syncBackfill();
+      log("Stripe initialized and synced", "stripe");
+    } catch (e) {
+      console.error("Stripe init error (billing features unavailable):", e);
+    }
+  })();
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

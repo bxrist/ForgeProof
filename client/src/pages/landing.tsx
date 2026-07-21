@@ -40,6 +40,9 @@ import {
   Milestone,
   Server,
   Download,
+  Cloud,
+  Sparkles,
+  DollarSign,
 } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { ForgeProofLogo } from "@/components/ForgeProofLogo";
@@ -153,6 +156,7 @@ function Navbar() {
             <a href="#architecture" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-architecture">Architecture</a>
             <a href="#use-cases" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-use-cases">Use Cases</a>
             <a href="#why-forgeproof" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-why-forgeproof">Why ForgeProof</a>
+            <a href="#pricing" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-pricing">Pricing</a>
             <a href="#regulations" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-compliance">Compliance</a>
             <Link href="/threat-model" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-threat-model">Threat Model</Link>
             <Link href="/sdk" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-sdk">SDK</Link>
@@ -216,6 +220,7 @@ function Navbar() {
             <a href="#architecture" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-architecture">Architecture</a>
             <a href="#use-cases" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-use-cases">Use Cases</a>
             <a href="#why-forgeproof" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-why-forgeproof">Why ForgeProof</a>
+            <a href="#pricing" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-pricing">Pricing</a>
             <a href="#regulations" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-compliance">Compliance</a>
             <Link href="/threat-model" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-threat-model">Threat Model</Link>
             <Link href="/glossary" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-glossary">Glossary</Link>
@@ -286,6 +291,12 @@ function HeroSection() {
                     <ArrowRight className="w-4 h-4 ml-2" />
                   </Button>
                 </Link>
+                <a href="#pricing">
+                  <Button variant="outline" size="lg" data-testid="button-hero-pricing">
+                    <DollarSign className="w-4 h-4 mr-2" />
+                    View Pricing
+                  </Button>
+                </a>
                 <a href="https://github.com/bxrist/ForgeProof" target="_blank" rel="noopener noreferrer">
                   <Button variant="outline" size="lg" data-testid="button-hero-github">
                     <SiGithub className="w-4 h-4 mr-2" />
@@ -1434,6 +1445,9 @@ function OpenSourceSection() {
             <p className="text-lg text-muted-foreground">
               ForgeProof is released under the Apache License 2.0. Download it, self-host it, modify it, and integrate it into your workflow. All we ask is attribution.
             </p>
+            <p className="mt-4 text-base text-foreground font-medium">
+              Self-host for free forever, or <a href="#pricing" className="text-primary hover:underline" data-testid="link-open-source-hosted">let us run it for you</a> with hosted ForgeProof.
+            </p>
           </div>
         </FadeIn>
 
@@ -1558,6 +1572,7 @@ function RoadmapSection() {
     "Buyer-specific use case narratives",
     "Competitive landscape (SLSA, SBOM, C2PA, cosign)",
     "Regulatory compliance positioning (CMMC, EU AI Act, NIST)",
+    "Hosted SaaS with subscription billing",
   ];
 
   const planned = [
@@ -1810,6 +1825,301 @@ const { receipts } = await response.json();`,
   );
 }
 
+function PricingSection() {
+  const tiers = [
+    {
+      name: "Free",
+      price: "$0",
+      period: "/mo",
+      desc: "For individuals getting started with code provenance.",
+      icon: Sparkles,
+      popular: false,
+      cta: "Start Free",
+      features: [
+        "100 attestations / month",
+        "1 API key",
+        "Public verification",
+        "Community support",
+      ],
+    },
+    {
+      name: "Pro",
+      price: "$49",
+      period: "/mo",
+      desc: "For teams shipping AI-generated code at scale.",
+      icon: Zap,
+      popular: true,
+      cta: "Upgrade in Dashboard",
+      features: [
+        "10,000 attestations / month",
+        "10 API keys",
+        "Team features",
+        "Email support",
+      ],
+    },
+    {
+      name: "Enterprise",
+      price: "$249",
+      period: "/mo",
+      desc: "For organizations with compliance and SLA needs.",
+      icon: Building2,
+      popular: false,
+      cta: "Upgrade in Dashboard",
+      features: [
+        "Unlimited attestations",
+        "Unlimited API keys",
+        "SSO (roadmap)",
+        "SLA",
+        "Priority support",
+      ],
+    },
+  ];
+
+  const comparison = [
+    { label: "Monthly attestations", free: "100", pro: "10,000", enterprise: "Unlimited" },
+    { label: "API keys", free: "1", pro: "10", enterprise: "Unlimited" },
+    { label: "Hash-chain verification", free: true, pro: true, enterprise: true },
+    { label: "Badges & certificates", free: true, pro: true, enterprise: true },
+    { label: "Teams / organizations", free: false, pro: true, enterprise: true },
+    { label: "Audit logs", free: false, pro: true, enterprise: true },
+    { label: "Support level", free: "Community", pro: "Email", enterprise: "Priority + SLA" },
+  ];
+
+  const renderCell = (value: boolean | string) => {
+    if (typeof value === "boolean") {
+      return value ? (
+        <CheckCircle2 className="w-4 h-4 text-primary mx-auto" />
+      ) : (
+        <X className="w-4 h-4 text-muted-foreground/50 mx-auto" />
+      );
+    }
+    return <span className="text-sm">{value}</span>;
+  };
+
+  return (
+    <section id="pricing" className="py-20 sm:py-28">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <FadeIn>
+          <div className="text-center max-w-3xl mx-auto mb-16">
+            <Badge variant="outline" className="mb-4">
+              <DollarSign className="w-3 h-3 mr-1" />
+              Pricing
+            </Badge>
+            <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight mb-4">
+              Simple, Transparent Pricing
+            </h2>
+            <p className="text-lg text-muted-foreground">
+              Start free and scale as you grow. Every plan runs on the same open-source core — self-host for free forever, or let us run the hosted version for you.
+            </p>
+          </div>
+        </FadeIn>
+
+        <div className="grid md:grid-cols-3 gap-6 lg:gap-8 mb-16 items-stretch">
+          {tiers.map((tier, i) => (
+            <FadeIn key={tier.name} delay={i * 0.1} className="h-full">
+              <Card
+                className={`p-6 sm:p-8 h-full flex flex-col relative ${tier.popular ? "border-primary ring-1 ring-primary" : ""}`}
+                data-testid={`card-pricing-${tier.name.toLowerCase()}`}
+              >
+                {tier.popular && (
+                  <Badge className="absolute -top-3 left-1/2 -translate-x-1/2" data-testid="badge-most-popular">
+                    Most Popular
+                  </Badge>
+                )}
+                <div className="w-12 h-12 rounded-lg bg-primary/10 dark:bg-primary/20 flex items-center justify-center mb-5">
+                  <tier.icon className="w-6 h-6 text-primary" />
+                </div>
+                <h3 className="font-display text-xl font-semibold mb-1">{tier.name}</h3>
+                <div className="flex items-baseline gap-1 mb-3">
+                  <span className="font-display text-4xl font-bold" data-testid={`text-price-${tier.name.toLowerCase()}`}>{tier.price}</span>
+                  <span className="text-muted-foreground">{tier.period}</span>
+                </div>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-6">{tier.desc}</p>
+                <ul className="space-y-3 mb-8 flex-1">
+                  {tier.features.map((feature) => (
+                    <li key={feature} className="flex items-start gap-2 text-sm">
+                      <CheckCircle2 className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+                      <span>{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+                <a href="/api/login" className="w-full">
+                  <Button
+                    className="w-full"
+                    variant={tier.popular ? "default" : "outline"}
+                    data-testid={`button-pricing-${tier.name.toLowerCase()}`}
+                  >
+                    {tier.cta}
+                    <ArrowRight className="w-4 h-4 ml-2" />
+                  </Button>
+                </a>
+              </Card>
+            </FadeIn>
+          ))}
+        </div>
+
+        <FadeIn delay={0.3}>
+          <Card className="p-0 overflow-hidden" data-testid="table-pricing-comparison">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="p-4 text-sm font-semibold">Feature</th>
+                    <th className="p-4 text-sm font-semibold text-center">Free</th>
+                    <th className="p-4 text-sm font-semibold text-center">Pro</th>
+                    <th className="p-4 text-sm font-semibold text-center">Enterprise</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {comparison.map((row, i) => (
+                    <tr key={row.label} className={i < comparison.length - 1 ? "border-b border-border" : ""} data-testid={`row-comparison-${i}`}>
+                      <td className="p-4 text-sm font-medium">{row.label}</td>
+                      <td className="p-4 text-center">{renderCell(row.free)}</td>
+                      <td className="p-4 text-center">{renderCell(row.pro)}</td>
+                      <td className="p-4 text-center">{renderCell(row.enterprise)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </FadeIn>
+
+        <FadeIn delay={0.4}>
+          <p className="text-center text-sm text-muted-foreground mt-6">
+            Checkout and plan upgrades are handled securely in the dashboard Billing tab.
+          </p>
+        </FadeIn>
+      </div>
+    </section>
+  );
+}
+
+function WhyHostedSection() {
+  const selfHosted = [
+    "Free forever under Apache License 2.0",
+    "Run your own hash-chain ledger",
+    "Full control of your infrastructure",
+    "You manage keys, uptime, and upgrades",
+  ];
+
+  const hosted = [
+    "Managed hash-chain ledger with 24/7 uptime",
+    "Automatic key management & signature infrastructure",
+    "Always up-to-date — no upgrades to maintain",
+    "Public verification URLs that resolve for auditors",
+    "Zero-ops for teams — focus on shipping, not servers",
+  ];
+
+  return (
+    <section id="why-hosted" className="py-20 sm:py-28 bg-card/50 border-y border-border">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <FadeIn>
+          <div className="text-center max-w-3xl mx-auto mb-16">
+            <Badge variant="outline" className="mb-4">
+              <Cloud className="w-3 h-3 mr-1" />
+              Hosted vs Self-Hosted
+            </Badge>
+            <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight mb-4">
+              Why Hosted ForgeProof?
+            </h2>
+            <p className="text-lg text-muted-foreground">
+              <span className="text-foreground font-medium">Same open-source core. We run it for you.</span>{" "}
+              Whether you're an individual developer or an organization with teams, audit logs, and compliance reporting needs — choose the deployment that fits.
+            </p>
+          </div>
+        </FadeIn>
+
+        <div className="grid md:grid-cols-2 gap-6 lg:gap-8 mb-12 items-stretch">
+          <FadeIn delay={0.1} className="h-full">
+            <Card className="p-6 sm:p-8 h-full flex flex-col" data-testid="card-self-hosted">
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-12 h-12 rounded-lg bg-primary/10 dark:bg-primary/20 flex items-center justify-center">
+                  <Server className="w-6 h-6 text-primary" />
+                </div>
+                <div>
+                  <h3 className="font-display text-xl font-semibold">Self-Hosted</h3>
+                  <p className="text-xs text-muted-foreground">Open source, on your infrastructure</p>
+                </div>
+              </div>
+              <ul className="space-y-3 flex-1">
+                {selfHosted.map((item) => (
+                  <li key={item} className="flex items-start gap-2 text-sm">
+                    <CheckCircle2 className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+              <a href="https://github.com/bxrist/ForgeProof" target="_blank" rel="noopener noreferrer" className="mt-8">
+                <Button variant="outline" className="w-full" data-testid="button-hosted-selfhost">
+                  <SiGithub className="w-4 h-4 mr-2" />
+                  Get the Source
+                </Button>
+              </a>
+            </Card>
+          </FadeIn>
+
+          <FadeIn delay={0.2} className="h-full">
+            <Card className="p-6 sm:p-8 h-full flex flex-col border-primary ring-1 ring-primary" data-testid="card-hosted">
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-12 h-12 rounded-lg bg-primary/10 dark:bg-primary/20 flex items-center justify-center">
+                  <Cloud className="w-6 h-6 text-primary" />
+                </div>
+                <div>
+                  <h3 className="font-display text-xl font-semibold">Hosted</h3>
+                  <p className="text-xs text-muted-foreground">Managed by Flying Cloud Technology</p>
+                </div>
+              </div>
+              <ul className="space-y-3 flex-1">
+                {hosted.map((item) => (
+                  <li key={item} className="flex items-start gap-2 text-sm">
+                    <CheckCircle2 className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+              <a href="#pricing" className="mt-8">
+                <Button className="w-full" data-testid="button-hosted-pricing">
+                  View Hosted Plans
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+              </a>
+            </Card>
+          </FadeIn>
+        </div>
+
+        <FadeIn delay={0.3}>
+          <Card className="p-6 sm:p-8 bg-primary/5 dark:bg-primary/10 border-primary/20" data-testid="card-hosted-agents">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-full bg-primary/10 dark:bg-primary/20 flex items-center justify-center shrink-0">
+                <Cpu className="w-6 h-6 text-primary" />
+              </div>
+              <div>
+                <h4 className="font-display text-lg font-semibold mb-2">For AI Agents &amp; Teams</h4>
+                <p className="text-sm text-muted-foreground leading-relaxed mb-4">
+                  Hosted ForgeProof gives AI agents and engineering teams production-ready API endpoints with zero infrastructure setup. Point GPT Actions, MCP clients, and CI pipelines at hosted endpoints and start attesting immediately — no servers, no key management, no ops.
+                </p>
+                <div className="grid sm:grid-cols-3 gap-3">
+                  {[
+                    { icon: Cpu, label: "GPT Actions ready — OpenAPI spec out of the box" },
+                    { icon: Terminal, label: "MCP tool server for AI agent integration" },
+                    { icon: GitBranch, label: "CI/CD pipelines attest on every push" },
+                  ].map((item) => (
+                    <div key={item.label} className="flex items-start gap-2 text-sm">
+                      <item.icon className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+                      <span>{item.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </Card>
+        </FadeIn>
+      </div>
+    </section>
+  );
+}
+
 function CTASection() {
   return (
     <section className="py-20 sm:py-28 relative overflow-hidden">
@@ -1881,6 +2191,7 @@ function Footer() {
               <li><a href="#architecture" className="hover:text-foreground transition-colors" data-testid="link-footer-architecture">Architecture</a></li>
               <li><a href="#use-cases" className="hover:text-foreground transition-colors" data-testid="link-footer-use-cases">Use Cases</a></li>
               <li><a href="#why-forgeproof" className="hover:text-foreground transition-colors" data-testid="link-footer-why">Why ForgeProof</a></li>
+              <li><a href="#pricing" className="hover:text-foreground transition-colors" data-testid="link-footer-pricing">Pricing</a></li>
               <li><a href="#regulations" className="hover:text-foreground transition-colors" data-testid="link-footer-compliance">Compliance</a></li>
               <li><a href="#policy" className="hover:text-foreground transition-colors" data-testid="link-footer-policy">Policy Enforcement</a></li>
               <li><a href="#roadmap" className="hover:text-foreground transition-colors" data-testid="link-footer-roadmap">Roadmap</a></li>
@@ -1944,6 +2255,8 @@ export default function LandingPage() {
       <PolicyEnforcementSection />
       <PlatformFeaturesSection />
       <WhyForgeProofSection />
+      <PricingSection />
+      <WhyHostedSection />
       <RegulatorySection />
       <OpenSourceSection />
       <RoadmapSection />

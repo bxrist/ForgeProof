@@ -318,16 +318,24 @@ export class DatabaseStorage implements IStorage {
     const periodEnd = new Date(now);
     periodEnd.setMonth(periodEnd.getMonth() + 1);
 
-    return this.createSubscription({
-      userId,
-      plan: "free",
-      status: "active",
-      attestationLimit: PLAN_LIMITS.free.attestationLimit,
-      attestationCount: 0,
-      apiKeyLimit: PLAN_LIMITS.free.apiKeyLimit,
-      currentPeriodStart: now,
-      currentPeriodEnd: periodEnd,
-    });
+    const [created] = await db
+      .insert(subscriptions)
+      .values({
+        userId,
+        plan: "free",
+        status: "active",
+        attestationLimit: PLAN_LIMITS.free.attestationLimit,
+        attestationCount: 0,
+        apiKeyLimit: PLAN_LIMITS.free.apiKeyLimit,
+        currentPeriodStart: now,
+        currentPeriodEnd: periodEnd,
+      })
+      .onConflictDoNothing({ target: subscriptions.userId })
+      .returning();
+
+    if (created) return created;
+    const [existingAfterRace] = await db.select().from(subscriptions).where(eq(subscriptions.userId, userId));
+    return existingAfterRace;
   }
 }
 
