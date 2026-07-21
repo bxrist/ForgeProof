@@ -41,3 +41,7 @@ waitForPort = 5000
 
 [agent]
 integrations = ["github:1.0.0", "javascript_log_in_with_replit:2.0.0", "javascript_database:1.0.0", "stripe:1.0.0"]
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 20000
