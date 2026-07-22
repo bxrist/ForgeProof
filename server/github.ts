@@ -130,3 +130,53 @@ export async function fetchCommitFiles(owner: string, repo: string, sha: string)
     patch: file.patch || "",
   }));
 }
+
+export async function commitAttestationToGit(
+  token: string,
+  owner: string,
+  repo: string,
+  defaultBranch: string,
+  entryHash: string,
+  receiptJson: string,
+  modelProvider: string,
+  modelName: string
+): Promise<string> {
+  const filePath = `.forgeproof/receipts/${entryHash}.json`;
+  const commitMessage = `chore: ForgeProof attestation ${entryHash.slice(0, 8)} — ${modelProvider}/${modelName}`;
+  const contentBase64 = Buffer.from(receiptJson, "utf-8").toString("base64");
+
+  const apiBase = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`;
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "Content-Type": "application/json",
+  };
+
+  let existingSha: string | undefined;
+  const getRes = await fetch(apiBase, { headers });
+  if (getRes.ok) {
+    const existing = await getRes.json() as any;
+    existingSha = existing.sha;
+  }
+
+  const body: any = {
+    message: commitMessage,
+    content: contentBase64,
+    branch: defaultBranch,
+  };
+  if (existingSha) body.sha = existingSha;
+
+  const putRes = await fetch(apiBase, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  if (!putRes.ok) {
+    const errText = await putRes.text();
+    throw new Error(`GitHub Contents API error ${putRes.status}: ${errText}`);
+  }
+
+  const result = await putRes.json() as any;
+  return result.commit?.html_url as string;
+}

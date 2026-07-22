@@ -27,6 +27,7 @@ import {
   Info,
   RefreshCw,
   GitBranch,
+  ExternalLink,
 } from "lucide-react";
 import { SEO } from "@/components/SEO";
 
@@ -199,6 +200,14 @@ export default function AttestationDetailPage() {
               </div>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
+              {receipt.gitCommitUrl && (
+                <a href={receipt.gitCommitUrl} target="_blank" rel="noopener noreferrer">
+                  <Button variant="outline" size="sm" data-testid="button-view-git-commit">
+                    <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                    Git Commit
+                  </Button>
+                </a>
+              )}
               <Button variant="outline" size="sm" onClick={() => window.open(`/api/receipt/${receipt.id}/export`, '_blank')} data-testid="button-download-certificate">
                 <FileText className="w-3.5 h-3.5 mr-1.5" />
                 Certificate

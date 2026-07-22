@@ -6,6 +6,8 @@ import { sql } from "drizzle-orm";
 
 const SEED_USER_ID = "forgeproof-system";
 
+const GIT_COMMIT_NOTE = "git_commit_not_available_for_demo_attestations";
+
 const seedFiles = [
     {
     fileName: "schema.ts",
@@ -13,7 +15,7 @@ const seedFiles = [
     modelName: "GPT-5",
     modelProvider: "OpenAI",
     countryOfOrigin: "US",
-    metadata: { purpose: "Data model definitions for ForgeProof platform", self_attested: true },
+    metadata: { purpose: "Data model definitions for ForgeProof platform", self_attested: true, git_commit_url: GIT_COMMIT_NOTE },
   },
   {
     fileName: "routes.ts",
@@ -21,7 +23,7 @@ const seedFiles = [
     modelName: "GPT-5",
     modelProvider: "OpenAI",
     countryOfOrigin: "US",
-    metadata: { purpose: "API endpoint implementations", self_attested: true },
+    metadata: { purpose: "API endpoint implementations", self_attested: true, git_commit_url: GIT_COMMIT_NOTE },
   },
   {
     fileName: "crypto.ts",
@@ -29,7 +31,7 @@ const seedFiles = [
     modelName: "Replit Agent 3",
     modelProvider: "Replit",
     countryOfOrigin: "US",
-    metadata: { purpose: "Ed25519 signing and SHA-256 hashing utilities", self_attested: true },
+    metadata: { purpose: "Ed25519 signing and SHA-256 hashing utilities", self_attested: true, git_commit_url: GIT_COMMIT_NOTE },
   },
   {
     fileName: "landing.tsx",
@@ -37,7 +39,7 @@ const seedFiles = [
     modelName: "Replit Agent 3",
     modelProvider: "Replit",
     countryOfOrigin: "US",
-    metadata: { purpose: "Informational landing page component", self_attested: true },
+    metadata: { purpose: "Informational landing page component", self_attested: true, git_commit_url: GIT_COMMIT_NOTE },
   },
   {
     fileName: "dashboard.tsx",
@@ -45,7 +47,7 @@ const seedFiles = [
     modelName: "Replit Agent 3",
     modelProvider: "Replit",
     countryOfOrigin: "US",
-    metadata: { purpose: "User dashboard for managing attestations", self_attested: true },
+    metadata: { purpose: "User dashboard for managing attestations", self_attested: true, git_commit_url: GIT_COMMIT_NOTE },
   },
 ];
 

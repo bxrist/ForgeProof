@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import { pool } from "./db";
 import { setupAuth, isAuthenticated } from "./replit_integrations/auth/replitAuth";
 import { sha256, signData, getKeyPair, computeEntryHash, generateApiKey, verifySignature } from "./crypto";
-import { fetchUserRepos, fetchRepoFiles, fetchFileContent, fetchRepoCommits, fetchCommitFiles } from "./github";
+import { fetchUserRepos, fetchRepoFiles, fetchFileContent, fetchRepoCommits, fetchCommitFiles, commitAttestationToGit } from "./github";
 import { z } from "zod";
 import { getMcpManifest, handleMcpTool } from "./mcp";
 import { attestationReceipts } from "@shared/schema";
@@ -225,6 +225,7 @@ async function createAttestationReceipt(
         entryHash: row.entry_hash,
         receiptVersion: row.receipt_version,
         signedAt: row.signed_at,
+        gitCommitUrl: row.git_commit_url ?? null,
         metadata: row.metadata,
         createdAt: row.created_at,
       };
@@ -846,7 +847,71 @@ export async function registerRoutes(
     const detectedCountry = detectCountryFromRequest(req);
     try {
       const receipt = await createAttestationReceipt(userId, data, detectedCountry);
-      res.status(201).json(receipt);
+
+      let gitCommitUrl: string | null = null;
+      try {
+        const dbUser = await storage.getUser(userId!);
+        if (dbUser?.githubToken) {
+          const userRepos = await storage.getRepositories(userId!);
+          if (userRepos.length > 0) {
+            const targetRepo = (data.repository
+              ? userRepos.find(r => r.fullName === data.repository)
+              : null) ?? userRepos[0];
+
+            const parts = targetRepo.fullName.split("/");
+            if (parts.length === 2) {
+              const owner = parts[0];
+              const repoName = parts[1];
+              const defaultBranch = targetRepo.defaultBranch || "main";
+
+              const receiptJson = JSON.stringify({
+                receipt_version: receipt.receiptVersion,
+                id: receipt.id,
+                timestamp: receipt.createdAt,
+                file_name: receipt.fileName,
+                file_path: receipt.filePath,
+                file_hash: receipt.fileHash,
+                model_name: receipt.modelName,
+                model_provider: receipt.modelProvider,
+                country_of_origin: receipt.countryOfOrigin,
+                compliance_status: receipt.complianceStatus,
+                signature: receipt.signature,
+                public_key: receipt.publicKey,
+                entry_hash: receipt.entryHash,
+                prev_entry_hash: receipt.prevEntryHash,
+                signed_at: receipt.signedAt,
+                metadata: receipt.metadata,
+              }, null, 2);
+
+              const timeout = new Promise<null>((resolve) =>
+                setTimeout(() => resolve(null), 5000)
+              );
+              const commitResult = await Promise.race([
+                commitAttestationToGit(
+                  dbUser.githubToken,
+                  owner,
+                  repoName,
+                  defaultBranch,
+                  receipt.entryHash,
+                  receiptJson,
+                  receipt.modelProvider,
+                  receipt.modelName
+                ),
+                timeout,
+              ]);
+
+              if (commitResult) {
+                gitCommitUrl = commitResult;
+                await storage.updateAttestationGitCommitUrl(receipt.id, gitCommitUrl);
+              }
+            }
+          }
+        }
+      } catch (gitErr) {
+        console.error("[forgeproof] git commit failed (non-blocking):", gitErr);
+      }
+
+      res.status(201).json({ ...receipt, gitCommitUrl });
     } catch (error: any) {
       res.status(error.status || 500).json({ message: error.message || "Failed to create attestation" });
     }

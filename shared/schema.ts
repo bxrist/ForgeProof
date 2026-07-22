@@ -43,6 +43,7 @@ export const attestationReceipts = pgTable("attestation_receipts", {
   entryHash: varchar("entry_hash", { length: 128 }).notNull(),
   receiptVersion: varchar("receipt_version").default("v1"),
   signedAt: varchar("signed_at"),
+  gitCommitUrl: varchar("git_commit_url"),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").defaultNow(),
 });
