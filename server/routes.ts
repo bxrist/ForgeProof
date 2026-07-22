@@ -1053,8 +1053,24 @@ export async function registerRoutes(
             }
           }
         }
-      } catch (gitErr) {
+      } catch (gitErr: any) {
         console.error("[forgeproof] git commit failed (non-blocking):", gitErr);
+        try {
+          await storage.createAuditLog({
+            userId,
+            action: "attestation.git_commit_failed",
+            resourceType: "attestation",
+            resourceId: String(receipt.id),
+            metadata: {
+              errorMessage: gitErr?.message ?? String(gitErr),
+              receiptId: receipt.id,
+              entryHash: receipt.entryHash,
+            },
+            ipAddress: req.ip ?? null,
+          });
+        } catch (auditErr) {
+          console.error("[forgeproof] failed to write git_commit_failed audit log:", auditErr);
+        }
       }
 
       res.status(201).json({ ...receipt, gitCommitUrl });

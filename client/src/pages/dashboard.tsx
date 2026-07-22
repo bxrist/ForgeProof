@@ -53,6 +53,7 @@ import {
   Save,
   CreditCard,
   Loader2,
+  AlertTriangle,
 } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { SEO } from "@/components/SEO";
@@ -136,10 +137,12 @@ function AttestationRow({
   receipt,
   onCommitToGit,
   isCommitting,
+  hasGitFailure,
 }: {
   receipt: AttestationReceipt;
   onCommitToGit?: (id: number) => void;
   isCommitting?: boolean;
+  hasGitFailure?: boolean;
 }) {
   const [, navigate] = useLocation();
   return (
@@ -191,6 +194,35 @@ function AttestationRow({
             In Git
           </Badge>
         </a>
+      ) : hasGitFailure ? (
+        <span
+          title="Git commit failed — token may have expired. Click to retry."
+          className="shrink-0"
+          data-testid={`badge-git-failed-${receipt.id}`}
+        >
+          {onCommitToGit ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="shrink-0 text-yellow-600 dark:text-yellow-400 hover:text-yellow-700 dark:hover:text-yellow-300"
+              title="Git commit failed — click to retry"
+              disabled={isCommitting}
+              onClick={(e) => { e.stopPropagation(); onCommitToGit(receipt.id); }}
+              data-testid={`button-commit-git-${receipt.id}`}
+            >
+              {isCommitting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <AlertTriangle className="w-4 h-4" />
+              )}
+            </Button>
+          ) : (
+            <Badge variant="outline" className="text-xs gap-1 text-yellow-600 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800">
+              <AlertTriangle className="w-3 h-3" />
+              Failed
+            </Badge>
+          )}
+        </span>
       ) : onCommitToGit && (
         <Button
           variant="ghost"
@@ -1085,6 +1117,19 @@ export default function DashboardPage() {
 
   const uncommittedCount = receipts?.filter((r) => !r.gitCommitUrl && r.userId === user?.id).length ?? 0;
 
+  const gitCommitFailedIds = useMemo(() => {
+    if (!auditLogs) return new Set<number>();
+    return new Set(
+      auditLogs
+        .filter((l) => l.action === "attestation.git_commit_failed" && l.resourceId != null)
+        .map((l) => Number(l.resourceId))
+    );
+  }, [auditLogs]);
+
+  const gitCommitFailedCount = receipts?.filter(
+    (r) => gitCommitFailedIds.has(r.id) && !r.gitCommitUrl
+  ).length ?? 0;
+
   if (authLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -1199,6 +1244,15 @@ export default function DashboardPage() {
           </TabsList>
 
           <TabsContent value="attestations">
+            {gitCommitFailedCount > 0 && (
+              <div className="flex items-start gap-3 mb-3 rounded-lg border border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950/40 px-4 py-3 text-sm text-yellow-800 dark:text-yellow-300" data-testid="banner-git-commit-failed">
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                <div>
+                  <span className="font-medium">Git commit failed for {gitCommitFailedCount} attestation{gitCommitFailedCount !== 1 ? "s" : ""}.</span>
+                  {" "}Your GitHub token may have expired or lost write access. Re-connect GitHub or use the &ldquo;Commit to Git&rdquo; button to retry.
+                </div>
+              </div>
+            )}
             <Card>
               <div className="flex items-center justify-between gap-4 p-4 border-b border-border">
                 <h3 className="font-semibold text-sm">Attestation Receipts</h3>
@@ -1270,6 +1324,7 @@ export default function DashboardPage() {
                       receipt={r}
                       onCommitToGit={githubStatus?.connected && r.userId === user.id ? (id) => gitCommitMutation.mutate(id) : undefined}
                       isCommitting={committingId === r.id && gitCommitMutation.isPending}
+                      hasGitFailure={gitCommitFailedIds.has(r.id) && !r.gitCommitUrl}
                     />
                   ))}
                 </div>
