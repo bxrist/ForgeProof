@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -113,16 +113,58 @@ function LoadingRows() {
   );
 }
 
+const MAX_AUTO_RETRIES = 3;
+const RETRY_DELAYS = [1000, 2000, 4000];
+
 export default function DemoPage() {
   const { data: receipts, isLoading, isError, refetch, isFetching } = useQuery<AttestationReceipt[]>({
     queryKey: ["/api/demo/attestations"],
-    retry: 2,
+    retry: 0,
   });
   const { theme, toggleTheme } = useTheme();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
   const [complianceFilter, setComplianceFilter] = useState("all");
+
+  const [retryCount, setRetryCount] = useState(0);
+  const [isAutoRetrying, setIsAutoRetrying] = useState(false);
+  const [retriesExhausted, setRetriesExhausted] = useState(false);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!isError) {
+      setRetryCount(0);
+      setIsAutoRetrying(false);
+      setRetriesExhausted(false);
+      return;
+    }
+    if (retriesExhausted) return;
+    if (retryCount >= MAX_AUTO_RETRIES) {
+      setRetriesExhausted(true);
+      return;
+    }
+
+    setIsAutoRetrying(true);
+    const delay = RETRY_DELAYS[retryCount];
+    retryTimerRef.current = setTimeout(async () => {
+      const result = await refetch();
+      setIsAutoRetrying(false);
+      if (result.isError) {
+        setRetryCount((c) => c + 1);
+      }
+    }, delay);
+
+    return () => {
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    };
+  }, [isError, retryCount, retriesExhausted]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function handleManualRetry() {
+    setRetryCount(0);
+    setIsAutoRetrying(false);
+    setRetriesExhausted(false);
+  }
 
   const uniqueProviders = useMemo(() => {
     if (!receipts) return [];
@@ -298,15 +340,22 @@ export default function DemoPage() {
               <p className="text-sm text-muted-foreground max-w-sm mb-4">
                 There was a temporary problem loading attestation records. This is usually resolved within seconds.
               </p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => refetch()}
-                data-testid="button-demo-retry"
-              >
-                <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-                Try again
-              </Button>
+              {retriesExhausted ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleManualRetry}
+                  data-testid="button-demo-retry"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                  Try again
+                </Button>
+              ) : (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="demo-retrying-indicator">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Retrying automatically… (attempt {retryCount + 1} of {MAX_AUTO_RETRIES})</span>
+                </div>
+              )}
             </div>
           ) : filteredReceipts.length > 0 ? (
             <div className="divide-y divide-border">
