@@ -177,7 +177,21 @@ function AttestationRow({
       <div className="hidden md:block text-xs text-muted-foreground whitespace-nowrap">
         {receipt.createdAt ? new Date(receipt.createdAt).toLocaleDateString() : ""}
       </div>
-      {onCommitToGit && !receipt.gitCommitUrl && (
+      {receipt.gitCommitUrl ? (
+        <a
+          href={receipt.gitCommitUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          title="View git commit"
+          data-testid={`link-git-commit-${receipt.id}`}
+        >
+          <Badge variant="secondary" className="text-xs gap-1 text-green-600 dark:text-green-400 border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/40 hover:bg-green-100 dark:hover:bg-green-900/40 cursor-pointer shrink-0">
+            <SiGithub className="w-3 h-3" />
+            In Git
+          </Badge>
+        </a>
+      ) : onCommitToGit && (
         <Button
           variant="ghost"
           size="icon"
