@@ -138,11 +138,13 @@ function AttestationRow({
   onCommitToGit,
   isCommitting,
   hasGitFailure,
+  targetRepoName,
 }: {
   receipt: AttestationReceipt;
   onCommitToGit?: (id: number) => void;
   isCommitting?: boolean;
   hasGitFailure?: boolean;
+  targetRepoName?: string;
 }) {
   const [, navigate] = useLocation();
   return (
@@ -224,21 +226,32 @@ function AttestationRow({
           )}
         </span>
       ) : onCommitToGit && (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="shrink-0 text-muted-foreground hover:text-foreground"
-          title="Commit this receipt to Git"
-          disabled={isCommitting}
-          onClick={(e) => { e.stopPropagation(); onCommitToGit(receipt.id); }}
-          data-testid={`button-commit-git-${receipt.id}`}
-        >
-          {isCommitting ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <SiGithub className="w-4 h-4" />
+        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+          {targetRepoName && (
+            <span
+              className="hidden sm:flex items-center gap-0.5 text-xs text-muted-foreground/70 whitespace-nowrap"
+              data-testid={`label-commit-target-${receipt.id}`}
+            >
+              <ArrowRight className="w-3 h-3" />
+              {targetRepoName}
+            </span>
           )}
-        </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground hover:text-foreground"
+            title={targetRepoName ? `Commit to ${targetRepoName}` : "Commit this receipt to Git"}
+            disabled={isCommitting}
+            onClick={() => onCommitToGit(receipt.id)}
+            data-testid={`button-commit-git-${receipt.id}`}
+          >
+            {isCommitting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <SiGithub className="w-4 h-4" />
+            )}
+          </Button>
+        </div>
       )}
       <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
     </div>
@@ -1360,15 +1373,24 @@ export default function DashboardPage() {
                 <LoadingRows />
               ) : filteredReceipts.length > 0 ? (
                 <div className="divide-y divide-border">
-                  {filteredReceipts.map((r) => (
-                    <AttestationRow
-                      key={r.id}
-                      receipt={r}
-                      onCommitToGit={githubStatus?.connected && r.userId === user.id ? (id) => gitCommitMutation.mutate({ id, repositoryId: selectedRepoId !== "__first__" ? Number(selectedRepoId) : undefined }) : undefined}
-                      isCommitting={committingId === r.id && gitCommitMutation.isPending}
-                      hasGitFailure={gitCommitFailedIds.has(r.id) && !r.gitCommitUrl}
-                    />
-                  ))}
+                  {filteredReceipts.map((r) => {
+                    const hasMultipleRepos = repos && repos.length > 1;
+                    const resolvedRepo = hasMultipleRepos
+                      ? (selectedRepoId !== "__first__"
+                          ? repos!.find((rep) => String(rep.id) === selectedRepoId)
+                          : repos![0])
+                      : undefined;
+                    return (
+                      <AttestationRow
+                        key={r.id}
+                        receipt={r}
+                        onCommitToGit={githubStatus?.connected && r.userId === user.id ? (id) => gitCommitMutation.mutate({ id, repositoryId: selectedRepoId !== "__first__" ? Number(selectedRepoId) : undefined }) : undefined}
+                        isCommitting={committingId === r.id && gitCommitMutation.isPending}
+                        hasGitFailure={gitCommitFailedIds.has(r.id) && !r.gitCommitUrl}
+                        targetRepoName={!r.gitCommitUrl && githubStatus?.connected && r.userId === user.id && resolvedRepo ? resolvedRepo.name : undefined}
+                      />
+                    );
+                  })}
                 </div>
               ) : receipts && receipts.length > 0 ? (
                 <EmptyState
