@@ -124,3 +124,77 @@ test.describe("Demo page — error state and retry", () => {
     ).toBeVisible({ timeout: 10000 });
   });
 });
+
+test.describe("Demo page — offline banner", () => {
+  test("shows offline banner when connection drops and hides it when dismissed", async ({
+    page,
+    context,
+  }) => {
+    await page.route(DEMO_API, (route) => {
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(MOCK_RECEIPT),
+      });
+    });
+
+    await page.goto("/demo");
+
+    await expect(
+      page.getByTestId(`row-demo-attestation-${MOCK_RECEIPT[0].id}`)
+    ).toBeVisible({ timeout: 10000 });
+
+    await expect(page.getByTestId("banner-offline")).not.toBeVisible();
+
+    await context.setOffline(true);
+
+    await expect(page.getByTestId("banner-offline")).toBeVisible({
+      timeout: 5000,
+    });
+
+    await expect(page.getByTestId("banner-offline")).toContainText("offline");
+
+    await expect(
+      page.getByTestId("button-dismiss-offline-banner")
+    ).toBeVisible();
+
+    await page.getByTestId("button-dismiss-offline-banner").click();
+
+    await expect(page.getByTestId("banner-offline")).not.toBeVisible();
+  });
+
+  test("auto-refetches and recovers data when connection returns", async ({
+    page,
+    context,
+  }) => {
+    await page.route(DEMO_API, (route) => {
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(MOCK_RECEIPT),
+      });
+    });
+
+    await page.goto("/demo");
+
+    await expect(
+      page.getByTestId(`row-demo-attestation-${MOCK_RECEIPT[0].id}`)
+    ).toBeVisible({ timeout: 10000 });
+
+    await context.setOffline(true);
+
+    await expect(page.getByTestId("banner-offline")).toBeVisible({
+      timeout: 5000,
+    });
+
+    await context.setOffline(false);
+
+    await expect(page.getByTestId("banner-offline")).not.toBeVisible({
+      timeout: 5000,
+    });
+
+    await expect(
+      page.getByTestId(`row-demo-attestation-${MOCK_RECEIPT[0].id}`)
+    ).toBeVisible({ timeout: 10000 });
+  });
+});

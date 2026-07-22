@@ -6,8 +6,8 @@
 
 # Test info
 
-- Name: demo-error.spec.ts >> Demo page — error state and retry >> manual Try Again button triggers successful recovery after auto-retries are exhausted
-- Location: tests/demo-error.spec.ts:92:3
+- Name: demo-error.spec.ts >> Demo page — offline banner >> auto-refetches and recovers data when connection returns
+- Location: tests/demo-error.spec.ts:166:3
 
 # Error details
 

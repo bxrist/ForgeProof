@@ -26,6 +26,8 @@ import {
   Sun,
   AlertTriangle,
   RefreshCw,
+  WifiOff,
+  X,
 } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { useTheme } from "@/components/ThemeProvider";
@@ -145,6 +147,27 @@ export default function DemoPage() {
   const [retriesExhausted, setRetriesExhausted] = useState(false);
   const [autoRetryDisplay, setAutoRetryDisplay] = useState(0);
 
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [offlineBannerDismissed, setOfflineBannerDismissed] = useState(false);
+
+  useEffect(() => {
+    function handleOffline() {
+      setIsOffline(true);
+      setOfflineBannerDismissed(false);
+    }
+    function handleOnline() {
+      setIsOffline(false);
+      setOfflineBannerDismissed(false);
+      refetch();
+    }
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("online", handleOnline);
+    return () => {
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [refetch]);
+
   useEffect(() => {
     if (!isError) {
       if (!isFetchingRef.current) {
@@ -224,6 +247,28 @@ export default function DemoPage() {
   return (
     <div className="min-h-screen bg-background">
       <SEO title="Demo" description="Explore ForgeProof's self-attesting seed data. View cryptographic attestation receipts without login." path="/demo" />
+
+      {isOffline && !offlineBannerDismissed && (
+        <div
+          role="alert"
+          data-testid="banner-offline"
+          className="relative z-[60] flex items-center justify-between gap-3 px-4 py-2.5 bg-amber-500 dark:bg-amber-600 text-white text-sm font-medium"
+        >
+          <div className="flex items-center gap-2">
+            <WifiOff className="w-4 h-4 shrink-0" />
+            <span>You're offline — live data is unavailable. We'll reload automatically when your connection returns.</span>
+          </div>
+          <button
+            onClick={() => setOfflineBannerDismissed(true)}
+            aria-label="Dismiss offline banner"
+            data-testid="button-dismiss-offline-banner"
+            className="shrink-0 rounded p-0.5 hover:bg-white/20 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       <header className="sticky top-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between gap-4 h-16">
