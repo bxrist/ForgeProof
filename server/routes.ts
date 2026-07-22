@@ -8,6 +8,7 @@ import { sha256, signData, getKeyPair, computeEntryHash, generateApiKey, verifyS
 import { fetchUserRepos, fetchRepoFiles, fetchFileContent, fetchRepoCommits, fetchCommitFiles, commitAttestationToGit } from "./github";
 import { z } from "zod";
 import { getMcpManifest, handleMcpTool } from "./mcp";
+import { sendGitCommitFailureEmail } from "./email";
 import { attestationReceipts } from "@shared/schema";
 import { desc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -1075,6 +1076,7 @@ export async function registerRoutes(
         }
       } catch (gitErr: any) {
         console.error("[forgeproof] git commit failed (non-blocking):", gitErr);
+        const errorMessage = gitErr?.message ?? String(gitErr);
         try {
           await storage.createAuditLog({
             userId,
@@ -1082,7 +1084,7 @@ export async function registerRoutes(
             resourceType: "attestation",
             resourceId: String(receipt.id),
             metadata: {
-              errorMessage: gitErr?.message ?? String(gitErr),
+              errorMessage,
               receiptId: receipt.id,
               entryHash: receipt.entryHash,
             },
@@ -1090,6 +1092,22 @@ export async function registerRoutes(
           });
         } catch (auditErr) {
           console.error("[forgeproof] failed to write git_commit_failed audit log:", auditErr);
+        }
+        try {
+          const failedUser = userId ? await storage.getUser(userId) : null;
+          const notifEmail = failedUser?.notificationEmail;
+          if (notifEmail) {
+            const baseUrl = `${req.protocol}://${req.get("host")}`;
+            await sendGitCommitFailureEmail({
+              to: notifEmail,
+              receiptId: receipt.id,
+              entryHash: receipt.entryHash,
+              errorMessage,
+              baseUrl,
+            });
+          }
+        } catch (emailErr) {
+          console.error("[forgeproof] failed to send git_commit_failed email:", emailErr);
         }
       }
 
