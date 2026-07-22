@@ -1074,11 +1074,13 @@ export default function DashboardPage() {
   });
 
   const [committingId, setCommittingId] = useState<number | null>(null);
+  const [selectedRepoId, setSelectedRepoId] = useState<string>("__first__");
 
   const gitCommitMutation = useMutation({
-    mutationFn: async (id: number) => {
+    mutationFn: async ({ id, repositoryId }: { id: number; repositoryId?: number }) => {
       setCommittingId(id);
-      const res = await apiRequest("POST", `/api/attestations/${id}/git-commit`);
+      const body = repositoryId ? { repositoryId } : {};
+      const res = await apiRequest("POST", `/api/attestations/${id}/git-commit`, body);
       return res.json() as Promise<{ gitCommitUrl: string }>;
     },
     onSuccess: () => {
@@ -1094,8 +1096,9 @@ export default function DashboardPage() {
   });
 
   const backfillGitMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/attestations/backfill-git");
+    mutationFn: async (repositoryId?: number) => {
+      const body = repositoryId ? { repositoryId } : {};
+      const res = await apiRequest("POST", "/api/attestations/backfill-git", body);
       return res.json() as Promise<{ total: number; succeeded: number; failed: number }>;
     },
     onSuccess: (data) => {
@@ -1258,20 +1261,38 @@ export default function DashboardPage() {
                 <h3 className="font-semibold text-sm">Attestation Receipts</h3>
                 <div className="flex items-center gap-2">
                   {githubStatus?.connected && uncommittedCount > 0 && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => backfillGitMutation.mutate()}
-                      disabled={backfillGitMutation.isPending}
-                      data-testid="button-backfill-git"
-                    >
-                      {backfillGitMutation.isPending ? (
-                        <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                      ) : (
-                        <SiGithub className="w-3.5 h-3.5 mr-1.5" />
+                    <div className="flex items-center gap-1.5">
+                      {repos && repos.length > 1 && (
+                        <Select value={selectedRepoId} onValueChange={setSelectedRepoId}>
+                          <SelectTrigger className="h-8 text-xs w-[180px]" data-testid="select-backfill-repo">
+                            <SelectValue placeholder="Select repository" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__first__">Default repository</SelectItem>
+                            {repos.map((r) => (
+                              <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       )}
-                      Commit {uncommittedCount} to Git
-                    </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const repoId = selectedRepoId !== "__first__" ? Number(selectedRepoId) : undefined;
+                          backfillGitMutation.mutate(repoId);
+                        }}
+                        disabled={backfillGitMutation.isPending}
+                        data-testid="button-backfill-git"
+                      >
+                        {backfillGitMutation.isPending ? (
+                          <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                        ) : (
+                          <SiGithub className="w-3.5 h-3.5 mr-1.5" />
+                        )}
+                        Commit {uncommittedCount} to Git
+                      </Button>
+                    </div>
                   )}
                   <Badge variant="outline" className="text-xs">
                     {filteredReceipts.length} of {receipts?.length ?? 0}
@@ -1322,7 +1343,7 @@ export default function DashboardPage() {
                     <AttestationRow
                       key={r.id}
                       receipt={r}
-                      onCommitToGit={githubStatus?.connected && r.userId === user.id ? (id) => gitCommitMutation.mutate(id) : undefined}
+                      onCommitToGit={githubStatus?.connected && r.userId === user.id ? (id) => gitCommitMutation.mutate({ id, repositoryId: selectedRepoId !== "__first__" ? Number(selectedRepoId) : undefined }) : undefined}
                       isCommitting={committingId === r.id && gitCommitMutation.isPending}
                       hasGitFailure={gitCommitFailedIds.has(r.id) && !r.gitCommitUrl}
                     />

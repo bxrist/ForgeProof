@@ -305,7 +305,17 @@ export async function registerRoutes(
       return res.status(400).json({ message: "No repositories connected. Add a repository first." });
     }
 
-    const targetRepo = userRepos[0];
+    const { repositoryId, fullName } = req.body as { repositoryId?: number; fullName?: string };
+    let targetRepo = userRepos[0];
+    if (repositoryId) {
+      const found = userRepos.find((r) => r.id === repositoryId);
+      if (!found) return res.status(400).json({ message: "Repository not found or not owned by you." });
+      targetRepo = found;
+    } else if (fullName) {
+      const found = userRepos.find((r) => r.fullName === fullName);
+      if (!found) return res.status(400).json({ message: "Repository not found or not owned by you." });
+      targetRepo = found;
+    }
     const parts = targetRepo.fullName.split("/");
     if (parts.length !== 2) {
       return res.status(400).json({ message: "Invalid repository name format." });
@@ -390,7 +400,17 @@ export async function registerRoutes(
       return res.status(400).json({ message: "No repositories connected. Add a repository first." });
     }
 
-    const targetRepo = userRepos[0];
+    const { repositoryId, fullName: bodyFullName } = req.body as { repositoryId?: number; fullName?: string };
+    let targetRepo = userRepos[0];
+    if (repositoryId) {
+      const found = userRepos.find((r) => r.id === repositoryId);
+      if (!found) return res.status(400).json({ message: "Repository not found or not owned by you." });
+      targetRepo = found;
+    } else if (bodyFullName) {
+      const found = userRepos.find((r) => r.fullName === bodyFullName);
+      if (!found) return res.status(400).json({ message: "Repository not found or not owned by you." });
+      targetRepo = found;
+    }
     const parts = targetRepo.fullName.split("/");
     if (parts.length !== 2) {
       return res.status(400).json({ message: "Invalid repository name format." });
