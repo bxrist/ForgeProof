@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, useParams } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
@@ -6,8 +7,9 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import type { AttestationReceipt } from "@shared/schema";
+import type { AttestationReceipt, Repository } from "@shared/schema";
 import { ForgeProofLogo } from "@/components/ForgeProofLogo";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
@@ -123,9 +125,17 @@ export default function AttestationDetailPage() {
     enabled: !!user,
   });
 
+  const { data: repos } = useQuery<Repository[]>({
+    queryKey: ["/api/repositories"],
+    enabled: !!user && !!githubStatus?.connected,
+  });
+
+  const [selectedRepoId, setSelectedRepoId] = useState<string>("__first__");
+
   const gitCommitMutation = useMutation({
-    mutationFn: async (id: number) => {
-      const res = await apiRequest("POST", `/api/attestations/${id}/git-commit`, {});
+    mutationFn: async ({ id, repositoryId }: { id: number; repositoryId?: number }) => {
+      const body = repositoryId ? { repositoryId } : {};
+      const res = await apiRequest("POST", `/api/attestations/${id}/git-commit`, body);
       return res.json() as Promise<{ gitCommitUrl: string }>;
     },
     onSuccess: () => {
@@ -328,19 +338,40 @@ export default function AttestationDetailPage() {
                 </p>
               </div>
               {githubStatus?.connected ? (
-                <Button
-                  size="sm"
-                  onClick={() => gitCommitMutation.mutate(receipt.id)}
-                  disabled={gitCommitMutation.isPending}
-                  data-testid="button-commit-to-git"
-                >
-                  {gitCommitMutation.isPending ? (
-                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                  ) : (
-                    <GitCommit className="w-3.5 h-3.5 mr-1.5" />
+                <div className="flex items-center gap-2 flex-wrap">
+                  {repos && repos.length > 1 && (
+                    <Select
+                      value={selectedRepoId}
+                      onValueChange={setSelectedRepoId}
+                    >
+                      <SelectTrigger className="h-8 text-xs w-[160px]" data-testid="select-commit-repo">
+                        <SelectValue placeholder="Select repository" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__first__">Default repository</SelectItem>
+                        {repos.map((r) => (
+                          <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   )}
-                  Commit to Git
-                </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => gitCommitMutation.mutate({
+                      id: receipt.id,
+                      repositoryId: selectedRepoId !== "__first__" ? Number(selectedRepoId) : undefined,
+                    })}
+                    disabled={gitCommitMutation.isPending}
+                    data-testid="button-commit-to-git"
+                  >
+                    {gitCommitMutation.isPending ? (
+                      <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                    ) : (
+                      <GitCommit className="w-3.5 h-3.5 mr-1.5" />
+                    )}
+                    Commit to Git
+                  </Button>
+                </div>
               ) : (
                 <Link href="/dashboard">
                   <Button variant="outline" size="sm" data-testid="button-connect-github">
