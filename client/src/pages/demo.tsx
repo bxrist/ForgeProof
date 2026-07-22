@@ -292,7 +292,7 @@ export default function DemoPage() {
             label="Attestations"
             value={receipts?.length ?? 0}
             icon={FileCheck}
-            loading={isLoading}
+            loading={isLoading || (isFetching && receipts == null)}
           />
           <StatCard
             label="Repository"
