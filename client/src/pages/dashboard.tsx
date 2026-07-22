@@ -132,7 +132,15 @@ function getAuditVerdictDisplay(verdict: string | null | undefined) {
   }
 }
 
-function AttestationRow({ receipt }: { receipt: AttestationReceipt }) {
+function AttestationRow({
+  receipt,
+  onCommitToGit,
+  isCommitting,
+}: {
+  receipt: AttestationReceipt;
+  onCommitToGit?: (id: number) => void;
+  isCommitting?: boolean;
+}) {
   const [, navigate] = useLocation();
   return (
     <div
@@ -169,6 +177,23 @@ function AttestationRow({ receipt }: { receipt: AttestationReceipt }) {
       <div className="hidden md:block text-xs text-muted-foreground whitespace-nowrap">
         {receipt.createdAt ? new Date(receipt.createdAt).toLocaleDateString() : ""}
       </div>
+      {onCommitToGit && !receipt.gitCommitUrl && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="shrink-0 text-muted-foreground hover:text-foreground"
+          title="Commit this receipt to Git"
+          disabled={isCommitting}
+          onClick={(e) => { e.stopPropagation(); onCommitToGit(receipt.id); }}
+          data-testid={`button-commit-git-${receipt.id}`}
+        >
+          {isCommitting ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <SiGithub className="w-4 h-4" />
+          )}
+        </Button>
+      )}
       <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
     </div>
   );
@@ -1002,6 +1027,50 @@ export default function DashboardPage() {
     },
   });
 
+  const [committingId, setCommittingId] = useState<number | null>(null);
+
+  const gitCommitMutation = useMutation({
+    mutationFn: async (id: number) => {
+      setCommittingId(id);
+      const res = await apiRequest("POST", `/api/attestations/${id}/git-commit`);
+      return res.json() as Promise<{ gitCommitUrl: string }>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/attestations"] });
+      toast({ title: "Receipt committed to Git" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Git commit failed", description: error.message, variant: "destructive" });
+    },
+    onSettled: () => {
+      setCommittingId(null);
+    },
+  });
+
+  const backfillGitMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/attestations/backfill-git");
+      return res.json() as Promise<{ total: number; succeeded: number; failed: number }>;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/attestations"] });
+      if (data.failed === 0) {
+        toast({ title: `${data.succeeded} receipt${data.succeeded === 1 ? "" : "s"} committed to Git` });
+      } else {
+        toast({
+          title: `${data.succeeded} committed, ${data.failed} failed`,
+          description: "Some receipts could not be committed. Check your GitHub token.",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (error: Error) => {
+      toast({ title: "Backfill failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const uncommittedCount = receipts?.filter((r) => !r.gitCommitUrl && r.userId === user?.id).length ?? 0;
+
   if (authLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -1119,9 +1188,27 @@ export default function DashboardPage() {
             <Card>
               <div className="flex items-center justify-between gap-4 p-4 border-b border-border">
                 <h3 className="font-semibold text-sm">Attestation Receipts</h3>
-                <Badge variant="outline" className="text-xs">
-                  {filteredReceipts.length} of {receipts?.length ?? 0}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  {githubStatus?.connected && uncommittedCount > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => backfillGitMutation.mutate()}
+                      disabled={backfillGitMutation.isPending}
+                      data-testid="button-backfill-git"
+                    >
+                      {backfillGitMutation.isPending ? (
+                        <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                      ) : (
+                        <SiGithub className="w-3.5 h-3.5 mr-1.5" />
+                      )}
+                      Commit {uncommittedCount} to Git
+                    </Button>
+                  )}
+                  <Badge variant="outline" className="text-xs">
+                    {filteredReceipts.length} of {receipts?.length ?? 0}
+                  </Badge>
+                </div>
               </div>
               <div className="flex flex-wrap items-center gap-3 p-4 border-b border-border">
                 <div className="relative flex-1 min-w-[200px]">
@@ -1164,7 +1251,12 @@ export default function DashboardPage() {
               ) : filteredReceipts.length > 0 ? (
                 <div className="divide-y divide-border">
                   {filteredReceipts.map((r) => (
-                    <AttestationRow key={r.id} receipt={r} />
+                    <AttestationRow
+                      key={r.id}
+                      receipt={r}
+                      onCommitToGit={githubStatus?.connected && r.userId === user.id ? (id) => gitCommitMutation.mutate(id) : undefined}
+                      isCommitting={committingId === r.id && gitCommitMutation.isPending}
+                    />
                   ))}
                 </div>
               ) : receipts && receipts.length > 0 ? (

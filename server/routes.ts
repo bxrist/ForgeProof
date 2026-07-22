@@ -290,6 +290,152 @@ export async function registerRoutes(
     res.json({ ...attestation, childAttestations });
   });
 
+  // ─── Git Backfill: bulk ────────────────────────────
+  app.post("/api/attestations/backfill-git", isAuthenticated, async (req, res) => {
+    const user = req.user as any;
+    const userId = user.claims?.sub || user.id;
+
+    const dbUser = await storage.getUser(userId);
+    if (!dbUser?.githubToken) {
+      return res.status(400).json({ message: "No GitHub token. Connect GitHub first." });
+    }
+
+    const userRepos = await storage.getRepositories(userId);
+    if (userRepos.length === 0) {
+      return res.status(400).json({ message: "No repositories connected. Add a repository first." });
+    }
+
+    const targetRepo = userRepos[0];
+    const parts = targetRepo.fullName.split("/");
+    if (parts.length !== 2) {
+      return res.status(400).json({ message: "Invalid repository name format." });
+    }
+
+    const [owner, repoName] = parts;
+    const defaultBranch = targetRepo.defaultBranch || "main";
+
+    const attestations = await storage.getAttestations(userId);
+    const pending = attestations.filter((a) => !a.gitCommitUrl && a.userId === userId);
+
+    let succeeded = 0;
+    let failed = 0;
+
+    for (const attestation of pending) {
+      if (attestation.userId !== userId) continue;
+
+      const receiptJson = JSON.stringify({
+        receipt_version: attestation.receiptVersion,
+        id: attestation.id,
+        timestamp: attestation.createdAt,
+        file_name: attestation.fileName,
+        file_path: attestation.filePath,
+        file_hash: attestation.fileHash,
+        model_name: attestation.modelName,
+        model_provider: attestation.modelProvider,
+        country_of_origin: attestation.countryOfOrigin,
+        compliance_status: attestation.complianceStatus,
+        signature: attestation.signature,
+        public_key: attestation.publicKey,
+        entry_hash: attestation.entryHash,
+        prev_entry_hash: attestation.prevEntryHash,
+        signed_at: attestation.signedAt,
+        metadata: attestation.metadata,
+      }, null, 2);
+
+      try {
+        const gitCommitUrl = await commitAttestationToGit(
+          dbUser.githubToken,
+          owner,
+          repoName,
+          defaultBranch,
+          attestation.entryHash,
+          receiptJson,
+          attestation.modelProvider,
+          attestation.modelName
+        );
+        await storage.updateAttestationGitCommitUrl(attestation.id, gitCommitUrl);
+        succeeded++;
+      } catch (err) {
+        console.error(`[forgeproof] backfill git commit failed for attestation ${attestation.id}:`, err);
+        failed++;
+      }
+    }
+
+    res.json({ total: pending.length, succeeded, failed });
+  });
+
+  // ─── Git Backfill: single attestation ─────────────
+  app.post("/api/attestations/:id/git-commit", isAuthenticated, async (req, res) => {
+    const id = parseInt(req.params.id as string);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+
+    const user = req.user as any;
+    const userId = user.claims?.sub || user.id;
+
+    const attestation = await storage.getAttestation(id);
+    if (!attestation) return res.status(404).json({ message: "Not found" });
+    if (attestation.userId !== userId) return res.status(403).json({ message: "Forbidden" });
+
+    if (attestation.gitCommitUrl) {
+      return res.status(409).json({ message: "Already committed to git.", gitCommitUrl: attestation.gitCommitUrl });
+    }
+
+    const dbUser = await storage.getUser(userId);
+    if (!dbUser?.githubToken) {
+      return res.status(400).json({ message: "No GitHub token. Connect GitHub first." });
+    }
+
+    const userRepos = await storage.getRepositories(userId);
+    if (userRepos.length === 0) {
+      return res.status(400).json({ message: "No repositories connected. Add a repository first." });
+    }
+
+    const targetRepo = userRepos[0];
+    const parts = targetRepo.fullName.split("/");
+    if (parts.length !== 2) {
+      return res.status(400).json({ message: "Invalid repository name format." });
+    }
+
+    const [owner, repoName] = parts;
+    const defaultBranch = targetRepo.defaultBranch || "main";
+
+    const receiptJson = JSON.stringify({
+      receipt_version: attestation.receiptVersion,
+      id: attestation.id,
+      timestamp: attestation.createdAt,
+      file_name: attestation.fileName,
+      file_path: attestation.filePath,
+      file_hash: attestation.fileHash,
+      model_name: attestation.modelName,
+      model_provider: attestation.modelProvider,
+      country_of_origin: attestation.countryOfOrigin,
+      compliance_status: attestation.complianceStatus,
+      signature: attestation.signature,
+      public_key: attestation.publicKey,
+      entry_hash: attestation.entryHash,
+      prev_entry_hash: attestation.prevEntryHash,
+      signed_at: attestation.signedAt,
+      metadata: attestation.metadata,
+    }, null, 2);
+
+    try {
+      const gitCommitUrl = await commitAttestationToGit(
+        dbUser.githubToken,
+        owner,
+        repoName,
+        defaultBranch,
+        attestation.entryHash,
+        receiptJson,
+        attestation.modelProvider,
+        attestation.modelName
+      );
+      await storage.updateAttestationGitCommitUrl(id, gitCommitUrl);
+      res.json({ gitCommitUrl });
+    } catch (err: any) {
+      res.status(502).json({ message: `Git commit failed: ${err.message}` });
+    }
+  });
+
   // ─── GitHub Repositories ──────────────────────────
   app.get("/api/repositories", isAuthenticated, async (req, res) => {
     const user = req.user as any;
