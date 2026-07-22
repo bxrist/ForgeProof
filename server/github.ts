@@ -140,7 +140,7 @@ export async function commitAttestationToGit(
   receiptJson: string,
   modelProvider: string,
   modelName: string
-): Promise<string> {
+): Promise<{ commitUrl: string; commitMessage: string }> {
   const filePath = `.forgeproof/receipts/${entryHash}.json`;
   const commitMessage = `chore: ForgeProof attestation ${entryHash.slice(0, 8)} — ${modelProvider}/${modelName}`;
   const contentBase64 = Buffer.from(receiptJson, "utf-8").toString("base64");
@@ -178,5 +178,5 @@ export async function commitAttestationToGit(
   }
 
   const result = await putRes.json() as any;
-  return result.commit?.html_url as string;
+  return { commitUrl: result.commit?.html_url as string, commitMessage };
 }

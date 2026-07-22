@@ -48,7 +48,7 @@ export interface IStorage {
   getAttestationsByParentId(parentId: number): Promise<AttestationReceipt[]>;
   getLatestAttestation(): Promise<AttestationReceipt | undefined>;
   createAttestation(receipt: InsertAttestationReceipt): Promise<AttestationReceipt>;
-  updateAttestationGitCommitUrl(id: number, url: string): Promise<void>;
+  updateAttestationGitCommitUrl(id: number, url: string, commitMessage?: string): Promise<void>;
 
   getApiKeys(userId: string): Promise<ApiKey[]>;
   getApiKeyByHash(keyHash: string): Promise<ApiKey | undefined>;
@@ -170,8 +170,8 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  async updateAttestationGitCommitUrl(id: number, url: string): Promise<void> {
-    await db.update(attestationReceipts).set({ gitCommitUrl: url }).where(eq(attestationReceipts.id, id));
+  async updateAttestationGitCommitUrl(id: number, url: string, commitMessage?: string): Promise<void> {
+    await db.update(attestationReceipts).set({ gitCommitUrl: url, ...(commitMessage ? { gitCommitMessage: commitMessage } : {}) }).where(eq(attestationReceipts.id, id));
   }
 
   async getApiKeys(userId: string): Promise<ApiKey[]> {

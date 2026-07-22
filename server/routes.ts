@@ -354,7 +354,7 @@ export async function registerRoutes(
       }, null, 2);
 
       try {
-        const gitCommitUrl = await commitAttestationToGit(
+        const { commitUrl: gitCommitUrl, commitMessage } = await commitAttestationToGit(
           dbUser.githubToken,
           owner,
           repoName,
@@ -364,7 +364,7 @@ export async function registerRoutes(
           attestation.modelProvider,
           attestation.modelName
         );
-        await storage.updateAttestationGitCommitUrl(attestation.id, gitCommitUrl);
+        await storage.updateAttestationGitCommitUrl(attestation.id, gitCommitUrl, commitMessage);
         succeeded++;
       } catch (err) {
         console.error(`[forgeproof] backfill git commit failed for attestation ${attestation.id}:`, err);
@@ -440,7 +440,7 @@ export async function registerRoutes(
     }, null, 2);
 
     try {
-      const gitCommitUrl = await commitAttestationToGit(
+      const { commitUrl: gitCommitUrl, commitMessage } = await commitAttestationToGit(
         dbUser.githubToken,
         owner,
         repoName,
@@ -450,8 +450,8 @@ export async function registerRoutes(
         attestation.modelProvider,
         attestation.modelName
       );
-      await storage.updateAttestationGitCommitUrl(id, gitCommitUrl);
-      res.json({ gitCommitUrl });
+      await storage.updateAttestationGitCommitUrl(id, gitCommitUrl, commitMessage);
+      res.json({ gitCommitUrl, commitMessage });
     } catch (err: any) {
       res.status(502).json({ message: `Git commit failed: ${err.message}` });
     }
@@ -1099,8 +1099,8 @@ export async function registerRoutes(
               ]);
 
               if (commitResult) {
-                gitCommitUrl = commitResult;
-                await storage.updateAttestationGitCommitUrl(receipt.id, gitCommitUrl);
+                gitCommitUrl = commitResult.commitUrl;
+                await storage.updateAttestationGitCommitUrl(receipt.id, commitResult.commitUrl, commitResult.commitMessage);
               }
             }
           }
