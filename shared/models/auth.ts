@@ -25,6 +25,7 @@ export const users = pgTable("users", {
   githubUsername: varchar("github_username"),
   notificationEmail: varchar("notification_email"),
   stripeCustomerId: varchar("stripe_customer_id"),
+  defaultRepoId: varchar("default_repo_id"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

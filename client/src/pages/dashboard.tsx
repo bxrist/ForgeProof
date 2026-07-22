@@ -1091,14 +1091,37 @@ export default function DashboardPage() {
     () => localStorage.getItem("forgeproof.backfillRepoId") ?? "__first__"
   );
 
+  const { data: userPrefs } = useQuery<{ defaultRepoId: string | null }>({
+    queryKey: ["/api/preferences"],
+  });
+
+  const savePreferenceMutation = useMutation({
+    mutationFn: async (defaultRepoId: string | null) => {
+      const res = await apiRequest("PATCH", "/api/preferences", { defaultRepoId });
+      return res.json();
+    },
+  });
+
+  useEffect(() => {
+    if (!userPrefs) return;
+    const serverVal = userPrefs.defaultRepoId ?? "__first__";
+    setSelectedRepoId(serverVal);
+    if (serverVal === "__first__") {
+      localStorage.removeItem("forgeproof.backfillRepoId");
+    } else {
+      localStorage.setItem("forgeproof.backfillRepoId", serverVal);
+    }
+  }, [userPrefs]);
+
   useEffect(() => {
     if (!repos) return;
-    const stored = localStorage.getItem("forgeproof.backfillRepoId");
-    if (stored && stored !== "__first__") {
-      const exists = repos.some((r) => String(r.id) === stored);
+    const current = selectedRepoId;
+    if (current && current !== "__first__") {
+      const exists = repos.some((r) => String(r.id) === current);
       if (!exists) {
         setSelectedRepoId("__first__");
         localStorage.removeItem("forgeproof.backfillRepoId");
+        savePreferenceMutation.mutate(null);
       }
     }
   }, [repos]);
@@ -1294,8 +1317,10 @@ export default function DashboardPage() {
                             setSelectedRepoId(val);
                             if (val === "__first__") {
                               localStorage.removeItem("forgeproof.backfillRepoId");
+                              savePreferenceMutation.mutate(null);
                             } else {
                               localStorage.setItem("forgeproof.backfillRepoId", val);
+                              savePreferenceMutation.mutate(val);
                             }
                           }}>
                           <SelectTrigger className="h-8 text-xs w-[180px]" data-testid="select-backfill-repo">

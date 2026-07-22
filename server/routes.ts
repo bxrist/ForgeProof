@@ -955,6 +955,22 @@ export async function registerRoutes(
     res.json({ notificationEmail });
   });
 
+  // ─── User Preferences ──────────────────────────────
+  app.get("/api/preferences", isAuthenticated, async (req, res) => {
+    const user = req.user as any;
+    const userId = user?.claims?.sub || user?.id;
+    const dbUser = await storage.getUser(userId);
+    res.json({ defaultRepoId: dbUser?.defaultRepoId || null });
+  });
+
+  app.patch("/api/preferences", isAuthenticated, async (req, res) => {
+    const user = req.user as any;
+    const userId = user?.claims?.sub || user?.id;
+    const { defaultRepoId } = req.body;
+    await storage.updateUser(userId, { defaultRepoId: defaultRepoId || null });
+    res.json({ defaultRepoId: defaultRepoId || null });
+  });
+
   // ─── Public Demo ──────────────────────────────────
   app.get("/api/demo/attestations", demoLimiter, async (_req, res) => {
     const attestations = await storage.getSystemAttestations();
