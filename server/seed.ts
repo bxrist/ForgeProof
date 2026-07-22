@@ -16,6 +16,7 @@ const seedFiles = [
     modelProvider: "OpenAI",
     countryOfOrigin: "US",
     gitCommitUrl: `${GITHUB_REPO}f62d5ce17c8ae9093d393fce7f9a2c426f08f144`,
+    gitCommitMessage: "Add Drizzle ORM schema with attestation receipts and hash chain support",
     metadata: { purpose: "Data model definitions for ForgeProof platform", self_attested: true },
   },
   {
@@ -25,6 +26,7 @@ const seedFiles = [
     modelProvider: "OpenAI",
     countryOfOrigin: "US",
     gitCommitUrl: `${GITHUB_REPO}5471de789d8f014d19aa5bca2a397d491bd2cc30`,
+    gitCommitMessage: "Implement REST API routes for attestation CRUD and GitHub OAuth",
     metadata: { purpose: "API endpoint implementations", self_attested: true },
   },
   {
@@ -34,6 +36,7 @@ const seedFiles = [
     modelProvider: "Replit",
     countryOfOrigin: "US",
     gitCommitUrl: `${GITHUB_REPO}cc3552fee89725d3a2c0602259ac79cba7769f14`,
+    gitCommitMessage: "Add Ed25519 signing, SHA-256 hashing, and hash chain computation",
     metadata: { purpose: "Ed25519 signing and SHA-256 hashing utilities", self_attested: true },
   },
   {
@@ -43,6 +46,7 @@ const seedFiles = [
     modelProvider: "Replit",
     countryOfOrigin: "US",
     gitCommitUrl: `${GITHUB_REPO}d3d6f4e1c2895df9fd2400f71edf7de2befecb5b`,
+    gitCommitMessage: "Build comprehensive landing page with sovereignty messaging and architecture diagram",
     metadata: { purpose: "Informational landing page component", self_attested: true },
   },
   {
@@ -52,6 +56,7 @@ const seedFiles = [
     modelProvider: "Replit",
     countryOfOrigin: "US",
     gitCommitUrl: `${GITHUB_REPO}7987b912e38a49ae271ce422f679f7d5ce8b705d`,
+    gitCommitMessage: "Add user dashboard with attestation list, GitHub sync, and API key management",
     metadata: { purpose: "User dashboard for managing attestations", self_attested: true },
   },
 ];
@@ -78,8 +83,14 @@ export async function seedDatabase() {
           const hasRealUrls = await db.select({ count: sql<number>`count(*)` }).from(attestationReceipts).where(sql`git_commit_url LIKE '%cc3552fee89725d3a2c0602259ac79cba7769f14%' AND user_id = 'forgeproof-system'`);
           const realUrlCount = Number(hasRealUrls[0].count);
           if (realUrlCount > 0) {
-            console.log("Seed data already exists with real git commit URLs, skipping...");
-            return;
+            const missingCommitMessages = await db.select({ count: sql<number>`count(*)` }).from(attestationReceipts).where(sql`git_commit_message IS NULL AND user_id = 'forgeproof-system'`);
+            const missingMsgCount = Number(missingCommitMessages[0].count);
+            if (missingMsgCount === 0) {
+              console.log("Seed data already exists with commit messages, skipping...");
+              return;
+            }
+            console.log(`Seed data missing commit messages (${missingMsgCount} entries). Clearing and re-seeding...`);
+            await db.delete(attestationReceipts).where(sql`user_id = 'forgeproof-system'`);
           }
           console.log("Seed data has placeholder git commit URLs. Clearing and re-seeding with real URLs...");
         } else {
@@ -132,6 +143,7 @@ export async function seedDatabase() {
       receiptVersion: "v1",
       signedAt: timestamp,
       gitCommitUrl: file.gitCommitUrl,
+      gitCommitMessage: file.gitCommitMessage,
       metadata: file.metadata,
     }).returning();
 
@@ -180,6 +192,7 @@ export async function seedDatabase() {
       receiptVersion: "v1",
       signedAt: timestamp,
       gitCommitUrl: `${GITHUB_REPO}53a268098939b9744903a608ea585fa30d1708bc`,
+      gitCommitMessage: "Anthropic audit: crypto module passes all security checks",
       metadata: { purpose: "Multi-model security audit of crypto module", auditor: "claude-3.5-sonnet" },
     });
     prevEntryHash = entryHash;
@@ -218,6 +231,7 @@ export async function seedDatabase() {
       receiptVersion: "v1",
       signedAt: timestamp,
       gitCommitUrl: `${GITHUB_REPO}84d1eef8732d4e4fe8e7251a8e3df0907c2054e0`,
+      gitCommitMessage: "OpenAI secondary audit: verify Ed25519 and hash chain integrity",
       metadata: { purpose: "Secondary security audit of crypto module", auditor: "GPT-5" },
     });
     prevEntryHash = entryHash;
@@ -254,6 +268,7 @@ export async function seedDatabase() {
       receiptVersion: "v1",
       signedAt: timestamp,
       gitCommitUrl: `${GITHUB_REPO}073bd5ac9af7945755962285e3b6299cfceb27f4`,
+      gitCommitMessage: "Add Express server entry point with rate limiting and middleware",
       metadata: { purpose: "Main server entry point", self_attested: true },
     });
     prevEntryHash = entryHash;
@@ -293,6 +308,7 @@ export async function seedDatabase() {
       receiptVersion: "v1",
       signedAt: timestamp,
       gitCommitUrl: `${GITHUB_REPO}b743e220061e6bd9271bc9d69587d61b11a77362`,
+      gitCommitMessage: "Claude audit: flag SQL injection risk in dynamic query construction",
       metadata: { purpose: "Multi-model security audit of routes module", auditor: "claude-3.5-sonnet" },
     }).returning();
     flaggedAuditId = flaggedAudit.id;
@@ -333,6 +349,7 @@ export async function seedDatabase() {
       receiptVersion: "v1",
       signedAt: timestamp,
       gitCommitUrl: `${GITHUB_REPO}14e6c786be3188764941b8b78c9b4554d6972495`,
+      gitCommitMessage: "Fix SQL injection: refactor to parameterized queries",
       metadata: { purpose: "Remediation of flagged security issue in routes module", auditor: "claude-3.5-sonnet" },
     });
     prevEntryHash = entryHash;

@@ -314,13 +314,19 @@ export default function AttestationDetailPage() {
                 <GitCommit className="w-4 h-4 text-green-700 dark:text-green-400" />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <Badge className="text-xs bg-green-600 hover:bg-green-600 text-white border-0 no-default-hover-elevate no-default-active-elevate" data-testid="badge-in-git">
                     <CheckCircle2 className="w-3 h-3 mr-1" />
                     In Git
                   </Badge>
+                  <span className="text-xs font-mono text-muted-foreground" data-testid="text-commit-sha">
+                    {receipt.gitCommitUrl?.split("/").pop()?.slice(0, 7)}
+                  </span>
                 </div>
-                <p className="text-xs text-muted-foreground mt-1 truncate">{receipt.gitCommitUrl}</p>
+                {receipt.gitCommitMessage && (
+                  <p className="text-sm font-medium mt-1.5 truncate" data-testid="text-commit-message">{receipt.gitCommitMessage}</p>
+                )}
+                <p className="text-xs text-muted-foreground mt-0.5 truncate">{receipt.gitCommitUrl}</p>
               </div>
               <ExternalLink className="w-4 h-4 text-green-600 dark:text-green-400 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
             </a>
