@@ -24,6 +24,7 @@ import {
   Info,
   RefreshCw,
   GitBranch,
+  GitCommit,
   ExternalLink,
 } from "lucide-react";
 import { SEO } from "@/components/SEO";
@@ -259,6 +260,38 @@ export default function DemoAttestationDetailPage() {
               </div>
             </div>
           </div>
+        </Card>
+
+        <Card className="p-6" data-testid="card-git-provenance">
+          <h3 className="font-semibold text-sm mb-4 flex items-center gap-2">
+            <GitCommit className="w-4 h-4 text-primary" />
+            Git Provenance
+          </h3>
+          {receipt.gitCommitUrl ? (
+            <a
+              href={receipt.gitCommitUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-3 p-4 rounded-lg border border-green-200 bg-green-50 dark:border-green-800/40 dark:bg-green-950/20 hover:bg-green-100 dark:hover:bg-green-950/30 transition-colors group"
+              data-testid="link-git-commit-demo"
+            >
+              <div className="w-9 h-9 rounded-full bg-green-100 dark:bg-green-900/50 flex items-center justify-center shrink-0">
+                <GitCommit className="w-4 h-4 text-green-700 dark:text-green-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <Badge className="text-xs bg-green-600 hover:bg-green-600 text-white border-0 no-default-hover-elevate no-default-active-elevate" data-testid="badge-in-git-demo">
+                    <CheckCircle2 className="w-3 h-3 mr-1" />
+                    In Git
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1 truncate">{receipt.gitCommitUrl}</p>
+              </div>
+              <ExternalLink className="w-4 h-4 text-green-600 dark:text-green-400 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
+            </a>
+          ) : (
+            <p className="text-sm text-muted-foreground" data-testid="text-not-in-git-demo">This receipt has not been committed to a Git repository.</p>
+          )}
         </Card>
 
         <Card className="p-6">

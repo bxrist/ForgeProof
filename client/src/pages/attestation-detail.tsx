@@ -1,5 +1,5 @@
 import { Link, useParams } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import type { AttestationReceipt } from "@shared/schema";
 import { ForgeProofLogo } from "@/components/ForgeProofLogo";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   ArrowLeft,
   ArrowRight,
@@ -27,7 +28,9 @@ import {
   Info,
   RefreshCw,
   GitBranch,
+  GitCommit,
   ExternalLink,
+  Loader2,
 } from "lucide-react";
 import { SEO } from "@/components/SEO";
 
@@ -113,6 +116,25 @@ export default function AttestationDetailPage() {
   const { data: receipt, isLoading } = useQuery<AttestationWithChildren>({
     queryKey: ["/api/attestations", params.id],
     enabled: !!params.id,
+  });
+
+  const { data: githubStatus } = useQuery<{ connected: boolean }>({
+    queryKey: ["/api/github/status"],
+    enabled: !!user,
+  });
+
+  const gitCommitMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("POST", `/api/attestations/${id}/git-commit`, {});
+      return res.json() as Promise<{ gitCommitUrl: string }>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/attestations", params.id] });
+      toast({ title: "Receipt committed to Git" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Git commit failed", description: error.message, variant: "destructive" });
+    },
   });
 
   const handleDownload = () => {
@@ -263,6 +285,73 @@ export default function AttestationDetailPage() {
               </div>
             </div>
           </div>
+        </Card>
+
+        <Card className="p-6" data-testid="card-git-provenance">
+          <h3 className="font-semibold text-sm mb-4 flex items-center gap-2">
+            <GitCommit className="w-4 h-4 text-primary" />
+            Git Provenance
+          </h3>
+          {receipt.gitCommitUrl ? (
+            <a
+              href={receipt.gitCommitUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-3 p-4 rounded-lg border border-green-200 bg-green-50 dark:border-green-800/40 dark:bg-green-950/20 hover:bg-green-100 dark:hover:bg-green-950/30 transition-colors group"
+              data-testid="link-git-commit"
+            >
+              <div className="w-9 h-9 rounded-full bg-green-100 dark:bg-green-900/50 flex items-center justify-center shrink-0">
+                <GitCommit className="w-4 h-4 text-green-700 dark:text-green-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <Badge className="text-xs bg-green-600 hover:bg-green-600 text-white border-0 no-default-hover-elevate no-default-active-elevate" data-testid="badge-in-git">
+                    <CheckCircle2 className="w-3 h-3 mr-1" />
+                    In Git
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1 truncate">{receipt.gitCommitUrl}</p>
+              </div>
+              <ExternalLink className="w-4 h-4 text-green-600 dark:text-green-400 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
+            </a>
+          ) : user && receipt.userId === user.id ? (
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 rounded-lg border border-dashed border-border bg-muted/30">
+              <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center shrink-0">
+                <GitCommit className="w-4 h-4 text-muted-foreground" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium" data-testid="text-not-in-git">Not yet committed to Git</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {githubStatus?.connected
+                    ? "Commit this receipt to your GitHub repository for permanent off-platform provenance."
+                    : "Connect GitHub in the dashboard to commit this receipt to a repository."}
+                </p>
+              </div>
+              {githubStatus?.connected ? (
+                <Button
+                  size="sm"
+                  onClick={() => gitCommitMutation.mutate(receipt.id)}
+                  disabled={gitCommitMutation.isPending}
+                  data-testid="button-commit-to-git"
+                >
+                  {gitCommitMutation.isPending ? (
+                    <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <GitCommit className="w-3.5 h-3.5 mr-1.5" />
+                  )}
+                  Commit to Git
+                </Button>
+              ) : (
+                <Link href="/dashboard">
+                  <Button variant="outline" size="sm" data-testid="button-connect-github">
+                    Connect GitHub
+                  </Button>
+                </Link>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground" data-testid="text-not-in-git-readonly">This receipt has not been committed to a Git repository.</p>
+          )}
         </Card>
 
         <Card className="p-6">
