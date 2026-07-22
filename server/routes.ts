@@ -973,8 +973,23 @@ export async function registerRoutes(
 
   // ─── Public Demo ──────────────────────────────────
   app.get("/api/demo/attestations", demoLimiter, async (_req, res) => {
-    const attestations = await storage.getSystemAttestations();
-    res.json(attestations);
+    try {
+      let attestations = await storage.getSystemAttestations();
+      if (attestations.length === 0) {
+        try {
+          const { seedDatabase } = await import("./seed");
+          await seedDatabase();
+          attestations = await storage.getSystemAttestations();
+        } catch (seedErr) {
+          console.error("Auto-seed on empty demo failed:", seedErr);
+          return res.status(503).json({ message: "Demo data is temporarily unavailable. Please try again shortly." });
+        }
+      }
+      res.json(attestations);
+    } catch (err) {
+      console.error("Failed to fetch demo attestations:", err);
+      res.status(503).json({ message: "Demo data is temporarily unavailable. Please try again shortly." });
+    }
   });
 
   app.get("/api/demo/attestations/:id", demoLimiter, async (req, res) => {

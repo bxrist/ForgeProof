@@ -24,6 +24,8 @@ import {
   BarChart3,
   Moon,
   Sun,
+  AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { useTheme } from "@/components/ThemeProvider";
@@ -112,8 +114,9 @@ function LoadingRows() {
 }
 
 export default function DemoPage() {
-  const { data: receipts, isLoading } = useQuery<AttestationReceipt[]>({
+  const { data: receipts, isLoading, isError, refetch, isFetching } = useQuery<AttestationReceipt[]>({
     queryKey: ["/api/demo/attestations"],
+    retry: 2,
   });
   const { theme, toggleTheme } = useTheme();
 
@@ -284,8 +287,27 @@ export default function DemoPage() {
               {filteredReceipts.length} of {receipts?.length ?? 0}
             </Badge>
           </div>
-          {isLoading ? (
+          {isLoading || isFetching ? (
             <LoadingRows />
+          ) : isError ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center" data-testid="demo-error-state">
+              <div className="w-14 h-14 rounded-full bg-destructive/10 flex items-center justify-center mb-4">
+                <AlertTriangle className="w-6 h-6 text-destructive" />
+              </div>
+              <h3 className="font-semibold mb-1">Demo data unavailable</h3>
+              <p className="text-sm text-muted-foreground max-w-sm mb-4">
+                There was a temporary problem loading attestation records. This is usually resolved within seconds.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetch()}
+                data-testid="button-demo-retry"
+              >
+                <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                Try again
+              </Button>
+            </div>
           ) : filteredReceipts.length > 0 ? (
             <div className="divide-y divide-border">
               {filteredReceipts.map((r) => (
@@ -298,7 +320,7 @@ export default function DemoPage() {
                 <FileCheck className="w-6 h-6 text-muted-foreground" />
               </div>
               <h3 className="font-semibold mb-1">No attestations found</h3>
-              <p className="text-sm text-muted-foreground max-w-sm">System attestations will appear here once the seed data is loaded.</p>
+              <p className="text-sm text-muted-foreground max-w-sm">No records match your current filters.</p>
             </div>
           )}
         </Card>
