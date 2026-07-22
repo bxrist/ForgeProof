@@ -27,7 +27,43 @@ const MOCK_RECEIPT = [
 ];
 
 test.describe("Demo page — error state and retry", () => {
-  test("shows error UI when API returns 503 and retry button appears after auto-retries exhaust", async ({
+  test("auto-recovers when DB comes back after two 503s: retrying indicator shown then data appears", async ({
+    page,
+  }) => {
+    let callCount = 0;
+
+    await page.route(DEMO_API, async (route) => {
+      callCount += 1;
+      if (callCount <= 2) {
+        await route.fulfill({ status: 503, body: "Service Unavailable" });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(MOCK_RECEIPT),
+        });
+      }
+    });
+
+    await page.goto("/demo");
+
+    await expect(page.getByTestId("demo-error-state")).toBeVisible({
+      timeout: 10000,
+    });
+    await expect(page.getByTestId("demo-retrying-indicator")).toBeVisible({
+      timeout: 5000,
+    });
+
+    await expect(page.getByTestId("demo-error-state")).not.toBeVisible({
+      timeout: 15000,
+    });
+
+    await expect(
+      page.getByTestId(`row-demo-attestation-${MOCK_RECEIPT[0].id}`)
+    ).toBeVisible({ timeout: 10000 });
+  });
+
+  test("shows retrying indicator during auto-retries and manual Try Again button only after 3 failures", async ({
     page,
   }) => {
     await page.route(DEMO_API, (route) => {
@@ -40,12 +76,20 @@ test.describe("Demo page — error state and retry", () => {
       timeout: 10000,
     });
 
+    await expect(page.getByTestId("demo-retrying-indicator")).toBeVisible({
+      timeout: 5000,
+    });
+
+    await expect(page.getByTestId("button-demo-retry")).not.toBeVisible();
+
     await expect(page.getByTestId("button-demo-retry")).toBeVisible({
       timeout: 15000,
     });
+
+    await expect(page.getByTestId("demo-retrying-indicator")).not.toBeVisible();
   });
 
-  test("retry button triggers a successful recovery when the API comes back", async ({
+  test("manual Try Again button triggers successful recovery after auto-retries are exhausted", async ({
     page,
   }) => {
     let callCount = 0;
