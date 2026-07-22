@@ -1074,7 +1074,21 @@ export default function DashboardPage() {
   });
 
   const [committingId, setCommittingId] = useState<number | null>(null);
-  const [selectedRepoId, setSelectedRepoId] = useState<string>("__first__");
+  const [selectedRepoId, setSelectedRepoId] = useState<string>(
+    () => localStorage.getItem("forgeproof.backfillRepoId") ?? "__first__"
+  );
+
+  useEffect(() => {
+    if (!repos) return;
+    const stored = localStorage.getItem("forgeproof.backfillRepoId");
+    if (stored && stored !== "__first__") {
+      const exists = repos.some((r) => String(r.id) === stored);
+      if (!exists) {
+        setSelectedRepoId("__first__");
+        localStorage.removeItem("forgeproof.backfillRepoId");
+      }
+    }
+  }, [repos]);
 
   const gitCommitMutation = useMutation({
     mutationFn: async ({ id, repositoryId }: { id: number; repositoryId?: number }) => {
@@ -1263,7 +1277,14 @@ export default function DashboardPage() {
                   {githubStatus?.connected && uncommittedCount > 0 && (
                     <div className="flex items-center gap-1.5">
                       {repos && repos.length > 1 && (
-                        <Select value={selectedRepoId} onValueChange={setSelectedRepoId}>
+                        <Select value={selectedRepoId} onValueChange={(val) => {
+                            setSelectedRepoId(val);
+                            if (val === "__first__") {
+                              localStorage.removeItem("forgeproof.backfillRepoId");
+                            } else {
+                              localStorage.setItem("forgeproof.backfillRepoId", val);
+                            }
+                          }}>
                           <SelectTrigger className="h-8 text-xs w-[180px]" data-testid="select-backfill-repo">
                             <SelectValue placeholder="Select repository" />
                           </SelectTrigger>
