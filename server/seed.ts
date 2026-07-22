@@ -15,7 +15,7 @@ const seedFiles = [
     modelName: "GPT-5",
     modelProvider: "OpenAI",
     countryOfOrigin: "US",
-    gitCommitUrl: `${GITHUB_REPO}3f8a1c2b9e4d7f6a0b5c3e1d8f2a4b7c9e0d3f6a`,
+    gitCommitUrl: `${GITHUB_REPO}f62d5ce17c8ae9093d393fce7f9a2c426f08f144`,
     metadata: { purpose: "Data model definitions for ForgeProof platform", self_attested: true },
   },
   {
@@ -24,7 +24,7 @@ const seedFiles = [
     modelName: "GPT-5",
     modelProvider: "OpenAI",
     countryOfOrigin: "US",
-    gitCommitUrl: `${GITHUB_REPO}7c2e9a4f1b8d5e3c0a7f2b9d4e6c1a8f3b5d0e7c`,
+    gitCommitUrl: `${GITHUB_REPO}5471de789d8f014d19aa5bca2a397d491bd2cc30`,
     metadata: { purpose: "API endpoint implementations", self_attested: true },
   },
   {
@@ -33,7 +33,7 @@ const seedFiles = [
     modelName: "Replit Agent 3",
     modelProvider: "Replit",
     countryOfOrigin: "US",
-    gitCommitUrl: `${GITHUB_REPO}b4d1f8e5a2c9b6e3f0d7a4c1b8e5f2d9a6c3b0e4`,
+    gitCommitUrl: `${GITHUB_REPO}cc3552fee89725d3a2c0602259ac79cba7769f14`,
     metadata: { purpose: "Ed25519 signing and SHA-256 hashing utilities", self_attested: true },
   },
   {
@@ -42,7 +42,7 @@ const seedFiles = [
     modelName: "Replit Agent 3",
     modelProvider: "Replit",
     countryOfOrigin: "US",
-    gitCommitUrl: `${GITHUB_REPO}e5a0c7b4d2f9e6c3b0a7f4d1e8c5b2a9f6d3c0e5`,
+    gitCommitUrl: `${GITHUB_REPO}d3d6f4e1c2895df9fd2400f71edf7de2befecb5b`,
     metadata: { purpose: "Informational landing page component", self_attested: true },
   },
   {
@@ -51,7 +51,7 @@ const seedFiles = [
     modelName: "Replit Agent 3",
     modelProvider: "Replit",
     countryOfOrigin: "US",
-    gitCommitUrl: `${GITHUB_REPO}a9f6c3b0e7d4a1f8c5b2e9d6c3a0f7b4e1d8c5a9`,
+    gitCommitUrl: `${GITHUB_REPO}7987b912e38a49ae271ce422f679f7d5ce8b705d`,
     metadata: { purpose: "User dashboard for managing attestations", self_attested: true },
   },
 ];
@@ -75,10 +75,16 @@ export async function seedDatabase() {
         const missingGitUrls = await db.select({ count: sql<number>`count(*)` }).from(attestationReceipts).where(sql`git_commit_url IS NULL AND user_id = 'forgeproof-system'`);
         const missingCount = Number(missingGitUrls[0].count);
         if (missingCount === 0) {
-          console.log("Seed data already exists with signedAt, OpenAI entries, and git commit URLs, skipping...");
-          return;
+          const hasRealUrls = await db.select({ count: sql<number>`count(*)` }).from(attestationReceipts).where(sql`git_commit_url LIKE '%cc3552fee89725d3a2c0602259ac79cba7769f14%' AND user_id = 'forgeproof-system'`);
+          const realUrlCount = Number(hasRealUrls[0].count);
+          if (realUrlCount > 0) {
+            console.log("Seed data already exists with real git commit URLs, skipping...");
+            return;
+          }
+          console.log("Seed data has placeholder git commit URLs. Clearing and re-seeding with real URLs...");
+        } else {
+          console.log(`Seed data has ${missingCount} entries missing git commit URLs. Clearing and re-seeding...`);
         }
-        console.log(`Seed data has ${missingCount} entries missing git commit URLs. Clearing and re-seeding...`);
         await db.delete(attestationReceipts).where(sql`user_id = 'forgeproof-system'`);
       } else {
         console.log("Seed data missing OpenAI entries. Clearing and re-seeding...");
@@ -173,7 +179,7 @@ export async function seedDatabase() {
       entryHash,
       receiptVersion: "v1",
       signedAt: timestamp,
-      gitCommitUrl: `${GITHUB_REPO}c2f5a8e1b4d7c0f3a6b9e2d5c8f1a4b7e0d3c6f2`,
+      gitCommitUrl: `${GITHUB_REPO}53a268098939b9744903a608ea585fa30d1708bc`,
       metadata: { purpose: "Multi-model security audit of crypto module", auditor: "claude-3.5-sonnet" },
     });
     prevEntryHash = entryHash;
@@ -211,7 +217,7 @@ export async function seedDatabase() {
       entryHash,
       receiptVersion: "v1",
       signedAt: timestamp,
-      gitCommitUrl: `${GITHUB_REPO}d3e6b9c2f5a8d1e4b7c0f3a6d9e2b5c8f1d4e7b0`,
+      gitCommitUrl: `${GITHUB_REPO}84d1eef8732d4e4fe8e7251a8e3df0907c2054e0`,
       metadata: { purpose: "Secondary security audit of crypto module", auditor: "GPT-5" },
     });
     prevEntryHash = entryHash;
@@ -247,7 +253,7 @@ export async function seedDatabase() {
       entryHash,
       receiptVersion: "v1",
       signedAt: timestamp,
-      gitCommitUrl: `${GITHUB_REPO}f0a3d6b9e2c5f8a1d4e7b0c3f6a9d2e5b8c1f4a7`,
+      gitCommitUrl: `${GITHUB_REPO}073bd5ac9af7945755962285e3b6299cfceb27f4`,
       metadata: { purpose: "Main server entry point", self_attested: true },
     });
     prevEntryHash = entryHash;
@@ -286,7 +292,7 @@ export async function seedDatabase() {
       entryHash,
       receiptVersion: "v1",
       signedAt: timestamp,
-      gitCommitUrl: `${GITHUB_REPO}1e4b7d0c3f6a9e2d5b8c1f4a7d0e3b6c9f2a5d8e1`,
+      gitCommitUrl: `${GITHUB_REPO}b743e220061e6bd9271bc9d69587d61b11a77362`,
       metadata: { purpose: "Multi-model security audit of routes module", auditor: "claude-3.5-sonnet" },
     }).returning();
     flaggedAuditId = flaggedAudit.id;
@@ -326,7 +332,7 @@ export async function seedDatabase() {
       entryHash,
       receiptVersion: "v1",
       signedAt: timestamp,
-      gitCommitUrl: `${GITHUB_REPO}2b5e8c1f4a7d0e3b6c9f2a5d8e1b4c7f0a3d6b9e2`,
+      gitCommitUrl: `${GITHUB_REPO}14e6c786be3188764941b8b78c9b4554d6972495`,
       metadata: { purpose: "Remediation of flagged security issue in routes module", auditor: "claude-3.5-sonnet" },
     });
     prevEntryHash = entryHash;
