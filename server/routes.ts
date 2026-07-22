@@ -1774,6 +1774,18 @@ export async function registerRoutes(
     res.send(html);
   });
 
+  // Commit URL health check — verifies seed gitCommitUrls are still reachable
+  app.get("/api/admin/commit-health", async (_req, res) => {
+    try {
+      const { checkSeedCommitUrls } = await import("./commitHealthCheck");
+      const report = await checkSeedCommitUrls();
+      const statusCode = report.broken > 0 ? 207 : 200;
+      res.status(statusCode).json(report);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // For demo purposes, we allow clearing and re-seeding via a special internal-only endpoint
   app.post("/api/admin/reseed", async (req, res) => {
     try {

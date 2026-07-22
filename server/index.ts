@@ -101,6 +101,18 @@ app.use((req, res, next) => {
 
   (async () => {
     try {
+      const { runCommitHealthCheck } = await import("./commitHealthCheck");
+      await runCommitHealthCheck();
+      // Re-run every 24 hours so broken URLs surface in logs without a restart
+      const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+      setInterval(runCommitHealthCheck, TWENTY_FOUR_HOURS);
+    } catch (e) {
+      console.error("Commit health check error:", e);
+    }
+  })();
+
+  (async () => {
+    try {
       const { runMigrations } = await import("stripe-replit-sync");
       await runMigrations({ databaseUrl: process.env.DATABASE_URL!, schema: "stripe" });
       const { getStripeSync } = await import("./stripeClient");
