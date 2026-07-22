@@ -62,7 +62,17 @@ function AttestationRow({ receipt }: { receipt: AttestationReceipt }) {
       </div>
       <div className="flex-1 min-w-0">
         <div className="font-medium text-sm truncate">{receipt.fileName}</div>
-        <div className="text-xs text-muted-foreground truncate">{receipt.filePath}</div>
+        {receipt.gitCommitMessage ? (
+          <div
+            className="text-xs text-muted-foreground truncate italic"
+            title={receipt.gitCommitMessage}
+            data-testid={`text-commit-message-${receipt.id}`}
+          >
+            {receipt.gitCommitMessage}
+          </div>
+        ) : (
+          <div className="text-xs text-muted-foreground truncate">{receipt.filePath}</div>
+        )}
       </div>
       <div className="hidden sm:flex items-center gap-2">
         <Badge variant="secondary" className="text-xs">
