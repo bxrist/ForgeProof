@@ -127,43 +127,65 @@ export default function DemoPage() {
   const [providerFilter, setProviderFilter] = useState("all");
   const [complianceFilter, setComplianceFilter] = useState("all");
 
-  const [retryCount, setRetryCount] = useState(0);
-  const [isAutoRetrying, setIsAutoRetrying] = useState(false);
-  const [retriesExhausted, setRetriesExhausted] = useState(false);
+  const retryCountRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isFetchingRef = useRef(false);
+  isFetchingRef.current = isFetching;
+  const [retryTick, setRetryTick] = useState(0);
+  const [retriesExhausted, setRetriesExhausted] = useState(false);
+  const [autoRetryDisplay, setAutoRetryDisplay] = useState(0);
 
   useEffect(() => {
     if (!isError) {
-      setRetryCount(0);
-      setIsAutoRetrying(false);
-      setRetriesExhausted(false);
+      if (!isFetchingRef.current) {
+        retryCountRef.current = 0;
+        setAutoRetryDisplay(0);
+        setRetriesExhausted(false);
+        if (retryTimerRef.current) {
+          clearTimeout(retryTimerRef.current);
+          retryTimerRef.current = null;
+        }
+      }
       return;
     }
+
+    if (isFetchingRef.current) return;
+
     if (retriesExhausted) return;
-    if (retryCount >= MAX_AUTO_RETRIES) {
+
+    const attempt = retryCountRef.current;
+    if (attempt >= MAX_AUTO_RETRIES) {
       setRetriesExhausted(true);
       return;
     }
 
-    setIsAutoRetrying(true);
-    const delay = RETRY_DELAYS[retryCount];
-    retryTimerRef.current = setTimeout(async () => {
-      const result = await refetch();
-      setIsAutoRetrying(false);
-      if (result.isError) {
-        setRetryCount((c) => c + 1);
-      }
+    const delay = RETRY_DELAYS[attempt];
+    retryCountRef.current += 1;
+    setAutoRetryDisplay(retryCountRef.current);
+
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    retryTimerRef.current = setTimeout(() => {
+      refetch()
+        .then((result) => {
+          if (result.status !== "success") {
+            setRetryTick((t) => t + 1);
+          }
+        })
+        .catch(() => {
+          setRetryTick((t) => t + 1);
+        });
     }, delay);
 
     return () => {
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     };
-  }, [isError, retryCount, retriesExhausted]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isError, retryTick, retriesExhausted]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleManualRetry() {
-    setRetryCount(0);
-    setIsAutoRetrying(false);
+    retryCountRef.current = 0;
+    setAutoRetryDisplay(0);
     setRetriesExhausted(false);
+    setRetryTick((t) => t + 1);
   }
 
   const uniqueProviders = useMemo(() => {
@@ -353,7 +375,7 @@ export default function DemoPage() {
               ) : (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="demo-retrying-indicator">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>Retrying automatically… (attempt {retryCount + 1} of {MAX_AUTO_RETRIES})</span>
+                  <span>Retrying automatically… (attempt {autoRetryDisplay} of {MAX_AUTO_RETRIES})</span>
                 </div>
               )}
             </div>
