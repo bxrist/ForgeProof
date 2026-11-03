@@ -313,11 +313,20 @@ async function handleVerifyChain() {
   for (const entry of allAttestations) {
     const chainValid = entry.prevEntryHash === prevHash;
 
-    const timestamp = entry.createdAt ? new Date(entry.createdAt).toISOString() : new Date().toISOString();
+    const timestamp = entry.signedAt || (entry.createdAt ? new Date(entry.createdAt).toISOString() : "");
+    const recomputedHash = computeEntryHash({
+      fileHash: entry.fileHash,
+      modelName: entry.modelName,
+      modelProvider: entry.modelProvider,
+      countryOfOrigin: entry.countryOfOrigin,
+      prevEntryHash: entry.prevEntryHash,
+      timestamp,
+    });
+    const hashMatch = !!timestamp && recomputedHash === entry.entryHash;
     const signaturePayload = `${entry.entryHash}|${entry.fileHash}|${timestamp}`;
-    const signatureValid = verifySignature(signaturePayload, entry.signature, entry.publicKey);
+    const signatureValid = !!timestamp && verifySignature(signaturePayload, entry.signature, entry.publicKey);
 
-    const entryValid = chainValid && signatureValid;
+    const entryValid = chainValid && signatureValid && hashMatch;
     if (!entryValid) allValid = false;
 
     results.push({
@@ -326,6 +335,7 @@ async function handleVerifyChain() {
       entry_hash: entry.entryHash,
       chain_valid: chainValid,
       signature_valid: signatureValid,
+      hash_match: hashMatch,
       valid: entryValid,
     });
 

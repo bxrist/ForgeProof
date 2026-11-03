@@ -1318,7 +1318,7 @@ export async function registerRoutes(
       const expectedPrev = prevHash;
       const chainValid = entry.prevEntryHash === expectedPrev;
 
-      const timestamp = entry.signedAt || (entry.createdAt ? new Date(entry.createdAt).toISOString() : new Date().toISOString());
+      const timestamp = entry.signedAt || (entry.createdAt ? new Date(entry.createdAt).toISOString() : "");
       const recomputedHash = computeEntryHash({
         fileHash: entry.fileHash,
         modelName: entry.modelName,
@@ -1328,10 +1328,11 @@ export async function registerRoutes(
         timestamp,
       });
 
+      const hashMatch = !!timestamp && recomputedHash === entry.entryHash;
       const signaturePayload = `${entry.entryHash}|${entry.fileHash}|${timestamp}`;
-      const signatureValid = verifySignature(signaturePayload, entry.signature, entry.publicKey);
+      const signatureValid = !!timestamp && verifySignature(signaturePayload, entry.signature, entry.publicKey);
 
-      const entryValid = chainValid && signatureValid;
+      const entryValid = chainValid && signatureValid && hashMatch;
       if (!entryValid) allValid = false;
 
       results.push({
@@ -1342,6 +1343,7 @@ export async function registerRoutes(
         prevEntryHash: entry.prevEntryHash,
         chainValid,
         signatureValid,
+        hashMatch,
         valid: entryValid,
         complianceStatus: entry.complianceStatus,
         createdAt: entry.createdAt,
