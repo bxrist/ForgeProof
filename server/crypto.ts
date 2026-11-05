@@ -73,6 +73,19 @@ export function computeEntryHash(receipt: {
   return sha256(payload);
 }
 
+/** Resolve the timestamp used by the original signature without inventing one. */
+export function getReceiptSigningTimestamp(entry: { signedAt?: string | null; createdAt?: Date | string | null }): string {
+  if (entry.signedAt !== null && entry.signedAt !== undefined) {
+    if (typeof entry.signedAt !== "string" || !entry.signedAt.trim() || !Number.isFinite(Date.parse(entry.signedAt))) return "";
+    return entry.signedAt;
+  }
+  if (entry.createdAt) {
+    const createdAt = entry.createdAt instanceof Date ? entry.createdAt : new Date(entry.createdAt);
+    if (Number.isFinite(createdAt.getTime())) return createdAt.toISOString();
+  }
+  return "";
+}
+
 export function generateApiKey(): { fullKey: string; keyHash: string; keyPrefix: string } {
   const bytes = randomBytes(32);
   const fullKey = `fp_sk_${bytes.toString("base64url")}`;

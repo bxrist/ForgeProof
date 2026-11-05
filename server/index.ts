@@ -114,7 +114,7 @@ app.use((req, res, next) => {
   (async () => {
     try {
       const { runMigrations } = await import("stripe-replit-sync");
-      await runMigrations({ databaseUrl: process.env.DATABASE_URL!, schema: "stripe" });
+      await runMigrations({ databaseUrl: process.env.DATABASE_URL! });
       const { getStripeSync } = await import("./stripeClient");
       const stripeSync = await getStripeSync();
       const webhookBaseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`;

@@ -1,5 +1,5 @@
 import { storage } from "./storage";
-import { sha256, signData, getKeyPair, computeEntryHash, verifySignature } from "./crypto";
+import { sha256, signData, getKeyPair, computeEntryHash, verifySignature, getReceiptSigningTimestamp } from "./crypto";
 
 export const mcpToolDefinitions = [
   {
@@ -273,7 +273,7 @@ async function handleLookup(args: any) {
     return { found: false, message: "No attestation found for the given ID or hash" };
   }
 
-  const timestamp = entry.createdAt ? new Date(entry.createdAt).toISOString() : new Date().toISOString();
+  const timestamp = getReceiptSigningTimestamp(entry);
   const recomputedHash = computeEntryHash({
     fileHash: entry.fileHash,
     modelName: entry.modelName,
@@ -299,8 +299,9 @@ async function handleLookup(args: any) {
     country_of_origin: entry.countryOfOrigin,
     compliance_status: entry.complianceStatus,
     signature_valid: signatureValid,
-    hash_match: recomputedHash === entry.entryHash,
+    hash_match: !!timestamp && recomputedHash === entry.entryHash,
     created_at: entry.createdAt,
+    signed_at: entry.signedAt,
   };
 }
 
@@ -313,7 +314,7 @@ async function handleVerifyChain() {
   for (const entry of allAttestations) {
     const chainValid = entry.prevEntryHash === prevHash;
 
-    const timestamp = entry.signedAt || (entry.createdAt ? new Date(entry.createdAt).toISOString() : "");
+    const timestamp = getReceiptSigningTimestamp(entry);
     const recomputedHash = computeEntryHash({
       fileHash: entry.fileHash,
       modelName: entry.modelName,
