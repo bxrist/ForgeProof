@@ -4,7 +4,7 @@ import rateLimit from "express-rate-limit";
 import { storage } from "./storage";
 import { pool } from "./db";
 import { setupAuth, isAuthenticated } from "./replit_integrations/auth/replitAuth";
-import { sha256, signData, getKeyPair, computeEntryHash, generateApiKey, verifySignature } from "./crypto";
+import { sha256, signData, getKeyPair, computeEntryHash, generateApiKey, verifySignature, getReceiptSigningTimestamp } from "./crypto";
 import { fetchUserRepos, fetchRepoFiles, fetchFileContent, fetchRepoCommits, fetchCommitFiles, commitAttestationToGit } from "./github";
 import { z } from "zod";
 import { getMcpManifest, handleMcpTool } from "./mcp";
@@ -1318,7 +1318,7 @@ export async function registerRoutes(
       const expectedPrev = prevHash;
       const chainValid = entry.prevEntryHash === expectedPrev;
 
-      const timestamp = entry.signedAt || (entry.createdAt ? new Date(entry.createdAt).toISOString() : "");
+      const timestamp = getReceiptSigningTimestamp(entry);
       const recomputedHash = computeEntryHash({
         fileHash: entry.fileHash,
         modelName: entry.modelName,
@@ -1347,6 +1347,7 @@ export async function registerRoutes(
         valid: entryValid,
         complianceStatus: entry.complianceStatus,
         createdAt: entry.createdAt,
+        signedAt: entry.signedAt,
       });
 
       prevHash = entry.entryHash;
@@ -1361,7 +1362,7 @@ export async function registerRoutes(
     const entry = await storage.getAttestation(id);
     if (!entry) return res.status(404).json({ message: "Not found" });
 
-    const timestamp = entry.signedAt || (entry.createdAt ? new Date(entry.createdAt).toISOString() : new Date().toISOString());
+    const timestamp = getReceiptSigningTimestamp(entry);
     const recomputedHash = computeEntryHash({
       fileHash: entry.fileHash,
       modelName: entry.modelName,
@@ -1390,7 +1391,7 @@ export async function registerRoutes(
       entryHash: entry.entryHash,
       prevEntryHash: entry.prevEntryHash,
       signatureValid,
-      hashMatch: recomputedHash === entry.entryHash,
+      hashMatch: !!timestamp && recomputedHash === entry.entryHash,
       complianceStatus: entry.complianceStatus,
       detectedCountry: entry.detectedCountry,
       countryOfOrigin: entry.countryOfOrigin,
@@ -1398,6 +1399,7 @@ export async function registerRoutes(
       modelName: entry.modelName,
       modelProvider: entry.modelProvider,
       createdAt: entry.createdAt,
+      signedAt: entry.signedAt,
     });
   });
 
@@ -1410,8 +1412,8 @@ export async function registerRoutes(
 
     let entry: any = null;
 
-    const idNum = parseInt(q);
-    if (!isNaN(idNum)) {
+    const idNum = /^\d+$/.test(q) ? Number(q) : NaN;
+    if (Number.isSafeInteger(idNum)) {
       entry = await storage.getAttestation(idNum);
     }
 
@@ -1423,7 +1425,7 @@ export async function registerRoutes(
       return res.status(404).json({ message: "No attestation found for the given ID or hash" });
     }
 
-    const timestamp = entry.createdAt ? new Date(entry.createdAt).toISOString() : new Date().toISOString();
+    const timestamp = getReceiptSigningTimestamp(entry);
     const recomputedHash = computeEntryHash({
       fileHash: entry.fileHash,
       modelName: entry.modelName,
@@ -1444,7 +1446,7 @@ export async function registerRoutes(
       entryHash: entry.entryHash,
       prevEntryHash: entry.prevEntryHash,
       signatureValid,
-      hashMatch: recomputedHash === entry.entryHash,
+      hashMatch: !!timestamp && recomputedHash === entry.entryHash,
       complianceStatus: entry.complianceStatus,
       detectedCountry: entry.detectedCountry,
       countryOfOrigin: entry.countryOfOrigin,
@@ -1454,6 +1456,7 @@ export async function registerRoutes(
       publicKey: entry.publicKey,
       receiptVersion: entry.receiptVersion,
       createdAt: entry.createdAt,
+      signedAt: entry.signedAt,
     });
   });
 
@@ -1663,7 +1666,7 @@ export async function registerRoutes(
       }
     }
 
-    const timestamp = entry.createdAt ? new Date(entry.createdAt).toISOString() : new Date().toISOString();
+    const timestamp = getReceiptSigningTimestamp(entry);
     const recomputedHash = computeEntryHash({
       fileHash: entry.fileHash,
       modelName: entry.modelName,
@@ -1675,7 +1678,7 @@ export async function registerRoutes(
 
     const signaturePayload = `${entry.entryHash}|${entry.fileHash}|${timestamp}`;
     const signatureValid = verifySignature(signaturePayload, entry.signature, entry.publicKey);
-    const hashMatch = recomputedHash === entry.entryHash;
+    const hashMatch = !!timestamp && recomputedHash === entry.entryHash;
 
     const statusEmoji = entry.complianceStatus === "verified" ? "&#x2705;" : entry.complianceStatus === "mismatch" ? "&#x274C;" : "&#x2753;";
     const sigEmoji = signatureValid ? "&#x2705;" : "&#x274C;";
