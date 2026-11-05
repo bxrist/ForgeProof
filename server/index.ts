@@ -113,6 +113,14 @@ app.use((req, res, next) => {
 
   (async () => {
     try {
+      if (process.env.STRIPE_CREDENTIAL_MODE === 'direct') {
+        // Direct mode requires a preconfigured endpoint; provider reconciliation needs separate approval.
+        const { getStripeSync } = await import("./stripeClient");
+        await getStripeSync();
+        log("Direct Stripe credentials validated; using preconfigured webhook", "stripe");
+        return;
+      }
+
       const { runMigrations } = await import("stripe-replit-sync");
       await runMigrations({ databaseUrl: process.env.DATABASE_URL! });
       const { getStripeSync } = await import("./stripeClient");
