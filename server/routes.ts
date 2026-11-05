@@ -12,6 +12,7 @@ import { sendGitCommitFailureEmail } from "./email";
 import { attestationReceipts } from "@shared/schema";
 import { desc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
+import { parseBillingConfig, assertIssuanceMode } from "./billing/attestation-meter";
 
 const publicApiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -120,6 +121,12 @@ async function createAttestationReceipt(
   detectedCountry: string | null,
   repositoryId?: number
 ) {
+  const billingConfig = parseBillingConfig(process.env);
+  try { assertIssuanceMode(billingConfig, "http"); } catch (error) {
+    const err: any = error;
+    err.status = 503;
+    throw err;
+  }
   const subscription = await storage.getOrCreateFreeSubscription(userId);
 
   const fileName = data.file_name || data.file_path.split("/").pop() || "unknown";
@@ -198,6 +205,16 @@ async function createAttestationReceipt(
           timestamp,
           data.metadata ? JSON.stringify(data.metadata) : null,
         ]
+      );
+
+      // Usage is an audit fact attached to a successfully issued receipt, not a charge.
+      const receiptId = insertResult.rows[0].id;
+      await client.query(
+        `INSERT INTO attestation_usage_events
+          (receipt_id, user_id, org_id, channel, entitlement, units, unit_price_cents, currency, settlement_status)
+         VALUES ($1,$2,$3,'http',$4,1,NULL,'USD','unsettled')
+         ON CONFLICT (receipt_id) DO NOTHING`,
+        [receiptId, userId, null, userId === "lifeos-service-0a" ? "delegated_entitlement" : "legacy_free"]
       );
 
       await client.query("COMMIT");

@@ -7,6 +7,7 @@ import {
   orgMembers,
   auditLogs,
   subscriptions,
+  attestationUsageEvents,
   PLAN_LIMITS,
   type InsertRepository,
   type Repository,
@@ -27,6 +28,7 @@ import {
 import type { User } from "@shared/models/auth";
 import { db } from "./db";
 import { eq, desc, and, or, asc, sql } from "drizzle-orm";
+import { withIssuanceMode } from "./billing/attestation-meter";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -47,7 +49,7 @@ export interface IStorage {
   getAttestationByEntryHash(entryHash: string): Promise<AttestationReceipt | undefined>;
   getAttestationsByParentId(parentId: number): Promise<AttestationReceipt[]>;
   getLatestAttestation(): Promise<AttestationReceipt | undefined>;
-  createAttestation(receipt: InsertAttestationReceipt): Promise<AttestationReceipt>;
+  createAttestation(receipt: InsertAttestationReceipt, channel?: "mcp" | "internal"): Promise<AttestationReceipt>;
   updateAttestationGitCommitUrl(id: number, url: string, commitMessage?: string): Promise<void>;
 
   getApiKeys(userId: string): Promise<ApiKey[]>;
@@ -165,9 +167,22 @@ export class DatabaseStorage implements IStorage {
     return receipt || undefined;
   }
 
-  async createAttestation(receipt: InsertAttestationReceipt): Promise<AttestationReceipt> {
-    const [created] = await db.insert(attestationReceipts).values(receipt).returning();
-    return created;
+  async createAttestation(receipt: InsertAttestationReceipt, channel: "mcp" | "internal" = "internal"): Promise<AttestationReceipt> {
+    return withIssuanceMode(process.env, channel === "mcp" ? "mcp" : "http", () => db.transaction(async (tx) => {
+      const [created] = await tx.insert(attestationReceipts).values(receipt).returning();
+      await tx.insert(attestationUsageEvents).values({
+        receiptId: created.id,
+        userId: receipt.userId,
+        orgId: receipt.orgId ?? null,
+        channel,
+        entitlement: receipt.userId === "lifeos-service-0a" ? "delegated_entitlement" : "legacy_free",
+        units: 1,
+        unitPriceCents: null,
+        currency: "USD",
+        settlementStatus: "unsettled",
+      }).onConflictDoNothing({ target: attestationUsageEvents.receiptId });
+      return created;
+    }));
   }
 
   async updateAttestationGitCommitUrl(id: number, url: string, commitMessage?: string): Promise<void> {

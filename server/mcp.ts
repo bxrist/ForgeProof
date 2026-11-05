@@ -1,4 +1,5 @@
 import { storage } from "./storage";
+import { parseBillingConfig, assertIssuanceMode } from "./billing/attestation-meter";
 import { sha256, signData, getKeyPair, computeEntryHash, verifySignature, getReceiptSigningTimestamp } from "./crypto";
 
 export const mcpToolDefinitions = [
@@ -121,6 +122,9 @@ async function createMcpAttestation(
     attestation_type?: string;
   }
 ) {
+  // MCP currently uses a separate non-transactional storage path. Keep it closed in
+  // quote-only per-attestation mode until receipt and usage can share one SQL transaction.
+  assertIssuanceMode(parseBillingConfig(process.env), "mcp");
   const fileName = data.file_name || data.file_path.split("/").pop() || "unknown";
   const timestamp = new Date().toISOString();
   const latest = await storage.getLatestAttestation();
@@ -157,7 +161,7 @@ async function createMcpAttestation(
     receiptVersion: "v1",
     metadata: data.metadata || null,
     attestationType: data.attestation_type || "origin",
-  });
+  }, "mcp");
 }
 
 async function handleAttest(args: any, userId: string) {

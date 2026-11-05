@@ -95,6 +95,21 @@ export const subscriptions = pgTable("subscriptions", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Append-only audit record for completed issuance units. It records usage, never money settled.
+export const attestationUsageEvents = pgTable("attestation_usage_events", {
+  id: serial("id").primaryKey(),
+  receiptId: integer("receipt_id").notNull().unique(),
+  userId: varchar("user_id").notNull(),
+  orgId: integer("org_id"),
+  channel: varchar("channel").notNull(),
+  entitlement: varchar("entitlement").notNull(),
+  units: integer("units").notNull().default(1),
+  unitPriceCents: integer("unit_price_cents"),
+  currency: varchar("currency", { length: 3 }).notNull().default("USD"),
+  settlementStatus: varchar("settlement_status").notNull().default("unsettled"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const auditLogs = pgTable("audit_logs", {
   id: serial("id").primaryKey(),
   userId: varchar("user_id"),
