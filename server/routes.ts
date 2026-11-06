@@ -12,6 +12,7 @@ import { sendGitCommitFailureEmail } from "./email";
 import { attestationReceipts } from "@shared/schema";
 import { desc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
+import { hasApiKeyPermission, verifyGitHubWebhookSignature, mcpToolPermission, type ApiKeyPermission } from "./security";
 
 const publicApiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -97,14 +98,14 @@ function computeComplianceStatus(declared: string, detected: string | null): str
   return "mismatch";
 }
 
-async function authenticateApiKey(req: Request): Promise<string | null> {
+async function authenticateApiKey(req: Request, requiredPermission: ApiKeyPermission): Promise<string | null> {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) return null;
 
   const token = authHeader.substring(7);
   const keyHash = sha256(token);
   const apiKey = await storage.getApiKeyByHash(keyHash);
-  if (!apiKey || !apiKey.isActive) return null;
+  if (!apiKey || !apiKey.isActive || !hasApiKeyPermission(apiKey.permissions, requiredPermission)) return null;
   if (apiKey.expiresAt && new Date(apiKey.expiresAt) < new Date()) return null;
 
   await storage.updateApiKeyLastUsed(apiKey.id);
@@ -713,14 +714,9 @@ export async function registerRoutes(
   // ─── GitHub Webhook ──────────────────────────────────
   app.post("/api/github/webhook", agentApiLimiter, async (req, res) => {
     const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
-    if (webhookSecret) {
-      const sigHeader = req.headers["x-hub-signature-256"] as string;
-      if (!sigHeader) return res.status(401).json({ message: "Missing X-Hub-Signature-256 header" });
-      const crypto = await import("crypto");
-      const expectedSig = "sha256=" + crypto.createHmac("sha256", webhookSecret)
-        .update(JSON.stringify(req.body))
-        .digest("hex");
-      if (sigHeader !== expectedSig) return res.status(401).json({ message: "Invalid webhook signature" });
+    if (!webhookSecret) return res.status(503).json({ message: "GitHub webhook secret is not configured" });
+    if (!verifyGitHubWebhookSignature(req.rawBody, req.headers["x-hub-signature-256"], webhookSecret)) {
+      return res.status(401).json({ message: "Invalid or missing GitHub webhook signature" });
     }
 
     const event = req.headers["x-github-event"] as string;
@@ -1008,7 +1004,7 @@ export async function registerRoutes(
   app.post("/api/v1/attest", publicApiLimiter, async (req, res) => {
     let userId: string | null = null;
 
-    userId = await authenticateApiKey(req);
+    userId = await authenticateApiKey(req, "attest:write");
     if (!userId && req.isAuthenticated()) {
       const user = req.user as any;
       userId = user.claims?.sub || user.id;
@@ -1188,7 +1184,7 @@ export async function registerRoutes(
 
   // ─── AI Agent Endpoints ───────────────────────────
   app.post("/api/v1/agents/openai", agentApiLimiter, async (req, res) => {
-    let userId = await authenticateApiKey(req);
+    let userId = await authenticateApiKey(req, "attest:write");
     if (!userId) return res.status(401).json({ message: "Bearer API key required" });
 
     const parsed = agentAttestSchema.safeParse(req.body);
@@ -1228,7 +1224,7 @@ export async function registerRoutes(
   });
 
   app.post("/api/v1/agents/claude", agentApiLimiter, async (req, res) => {
-    let userId = await authenticateApiKey(req);
+    let userId = await authenticateApiKey(req, "attest:write");
     if (!userId) return res.status(401).json({ message: "Bearer API key required" });
 
     const parsed = agentAttestSchema.safeParse(req.body);
@@ -1268,7 +1264,7 @@ export async function registerRoutes(
   });
 
   app.post("/api/v1/agents/replit", agentApiLimiter, async (req, res) => {
-    let userId = await authenticateApiKey(req);
+    let userId = await authenticateApiKey(req, "attest:write");
     if (!userId) return res.status(401).json({ message: "Bearer API key required" });
 
     const parsed = agentAttestSchema.safeParse(req.body);
@@ -1629,14 +1625,13 @@ export async function registerRoutes(
   });
 
   app.post("/api/mcp/tools", agentApiLimiter, async (req, res) => {
-    let userId = await authenticateApiKey(req);
-    if (!userId) {
-      return res.status(401).json({ message: "Bearer API key required for MCP tool execution" });
-    }
-
-    const { tool, arguments: args } = req.body;
+    const { tool, arguments: args } = req.body ?? {};
     if (!tool || typeof tool !== "string") {
       return res.status(400).json({ message: "Missing 'tool' field" });
+    }
+    const userId = await authenticateApiKey(req, mcpToolPermission(tool));
+    if (!userId) {
+      return res.status(401).json({ message: "Bearer API key with the required capability is required" });
     }
 
     try {
@@ -1779,28 +1774,13 @@ export async function registerRoutes(
     res.send(html);
   });
 
-  // Commit URL health check — verifies seed gitCommitUrls are still reachable
-  app.get("/api/admin/commit-health", async (_req, res) => {
-    try {
-      const { checkSeedCommitUrls } = await import("./commitHealthCheck");
-      const report = await checkSeedCommitUrls();
-      const statusCode = report.broken > 0 ? 207 : 200;
-      res.status(statusCode).json(report);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
+  // Retired unsafe demo/admin endpoints. Never allow unauthenticated data-destructive operations.
+  app.get("/api/admin/commit-health", (_req, res) => {
+    res.status(410).json({ message: "Administrative endpoint unavailable" });
   });
 
-  // For demo purposes, we allow clearing and re-seeding via a special internal-only endpoint
-  app.post("/api/admin/reseed", async (req, res) => {
-    try {
-      await storage.clearAllAttestations();
-      const { seedDatabase } = await import("./seed");
-      await seedDatabase();
-      res.json({ message: "Database re-seeded successfully" });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
+  app.post("/api/admin/reseed", (_req, res) => {
+    res.status(410).json({ message: "Administrative endpoint unavailable" });
   });
 
   return httpServer;
