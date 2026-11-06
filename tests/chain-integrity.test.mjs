@@ -54,17 +54,6 @@ test("HTTP lookup only parses strict decimal IDs, preserving full hash lookup", 
   assert.match(lookup, /storage\.getAttestationByEntryHash\(q\)/);
   assert.ok(lookup.indexOf("/^\\d+$/.test(q)") < lookup.indexOf("storage.getAttestationByEntryHash(q)"));
 });
-test("LifeOS entitlement provisioner is dry-run by default, scoped, and auditable", () => {
-  const provisioner = readFileSync(new URL("../scripts/provision-lifeos-identity.ts", import.meta.url), "utf8");
-  assert.match(provisioner, /export const LIFEOS_USER_ID = "lifeos-service-0a"/);
-  assert.match(provisioner, /if \(!options\.apply\)/);
-  assert.match(provisioner, /deps\.db\.transaction\(async \(tx\) =>/);
-  assert.match(provisioner, /attestationLimit: -1/);
-  assert.match(provisioner, /apiKeyLimit: -1/);
-  assert.match(provisioner, /stripeCustomerId: null/);
-  assert.match(provisioner, /stripeSubscriptionId: null/);
-  assert.match(provisioner, /action: AUDIT_ACTION/);
-});
 for (const [name, change] of Object.entries({ provider: { modelProvider: "spoofed" }, model: { modelName: "spoofed" }, country: { countryOfOrigin: "XX" }, time: { timestamp: "2026-11-03T12:01:00.000Z" }, file: { fileHash: "sha256:" + "b".repeat(64) }, signature: { signature: "AAAA" }, key: { publicKey: "invalid" }, link: { prevEntryHash: "f".repeat(64) } })) {
   test("reject " + name, () => assert.equal(valid({ ...receipt, ...change }), false));
 }

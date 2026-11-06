@@ -5,3 +5,21 @@ server/public
 vite.config.ts.*
 *.tar.gz
 .keys/
+# Local credentials and deployment secrets (never commit)
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.p12
+*.pfx
+*.key
+id_rsa
+id_ed25519
+credentials.json
+secrets.json
+
+# Local agent state, temporary attachments, and test output
+.agents/memory/
+attached_assets/
+test-results/

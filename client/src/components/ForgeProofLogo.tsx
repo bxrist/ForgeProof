@@ -1,4 +1,4 @@
-import logoImage from "@assets/8E0C5D6F-370B-4CC3-AC1C-F8F1C08A2A89_1771648705264.png";
+import logoImage from "../assets/forgeproof-logo.png";
 
 interface ForgeProofLogoProps {
   className?: string;
