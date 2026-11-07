@@ -1,0 +1,41 @@
+# ForgeProof Milestone 0B — private Git application parity (source only)
+
+## Original owner authority, verbatim
+
+> Milestone 0B: use the handoff of 0a and continue.
+>
+> Proceed until done
+>
+> Continue until done only prompt me if I’m absolutely needed
+
+These directions remain authoritative. The changes in this source branch are non-authoritative engineering implementations and tests, not permission to bypass production/commercial controls.
+
+## Added, independently tested source capabilities
+
+1. **Encrypted pending email records.** A private tenant/repository Git event contains only delivery state, a keyed HMAC message digest and AES-256-GCM authenticated ciphertext. Mail recipients, subjects and bodies are never included as plaintext in immutable Git events or request fingerprints. Only an explicitly injected runtime 32-byte key can recover the message for authorized delivery. Signed keyless replay verifies ciphertext envelope structure; missing key/corrupt evidence fails closed. New records start pending with zero attempts; encrypted content is immutable and sent/failed statuses cannot be reopened. This is not a tested production SMTP lease/claim implementation or exactly-once sending guarantee.
+2. **Immutable receipt GitHub export annotations.** Signed Git events bind a GitHub commit URL to the numeric receipt ID and independently verified original Ed25519 receipt entry hash, without rewriting, re-signing or changing historical original receipt bytes. Authorized owner-only GitStorage projections display the annotation; conflicting updates, deletion, missing receipt, unsafe URL and redirect/credential/token URLs are rejected. Case-variant hexadecimal SHAs are accepted and normalized.
+3. **Encrypted new runtime audit metadata.** The GitStorage adapter encrypts otherwise unsupported free-form metadata on new audit records using an independently injected runtime key and existing protected audit envelope, without placing the metadata in signed Git records or operation fingerprints. Legacy null-metadata audit records remain supported. Default read views keep metadata redacted. A request key is generated randomly rather than derived from private metadata. This does not promise exactly-once audit event creation: the existing IStorage createAuditLog contract offers no caller-supplied idempotency key and the existing SQL path likewise creates one new row per call.
+
+The source-only capabilities use the existing signed private Git event-store, original key pin/checkpoint rules and atomic ref update mechanism. These are not changes to the default server's PostgreSQL, Clerk, Stripe, payment, mail or HTTP request routes. No live data or secrets were copied or deployed. Test keys and customer identities are synthetic.
+
+The user-private Replit history contains unpublished application changes and differs from the public GitHub product branch. Only self-contained new Git-store source modules and synthetic tests were selectively ported here. No raw file from the Replit working tree, private source escrow, production database or customer artifacts was copied into this public repository. A static high-confidence secret-literal scan of the changed files reported zero matches.
+
+## Verification
+
+On isolated OCI public-upstream branch based on source commit `3da56a2d77db7bcfab79bfdc3ea6f4ca6c77470d`, the following independently executed successfully before source publication:
+
+- TypeScript: `npm run check` — PASS.
+- Signed Git store and synthetic integration regressions: `node --import tsx --test tests/*.test.mjs` — **106/106 PASS**.
+- Application build: `npm run build` — PASS.
+- `git diff --check` — PASS.
+- Independent Codex source review: no actionable issues found, opinion not an independent Darwin release signoff.
+
+The separately reconciled current Replit development application had 87/87 Git-store Node and 215/215 Replit server Vitest synthetic tests, TypeScript and full client/server build PASS before this selective public port. Different source trees and test counts must not be conflated.
+
+## Unfinished, genuine 0B acceptance work
+
+Production application source and deployed commit remain unreconciled with the 72 unpublished Replit commits; all production business/auth/billing routes still require their reviewed SQL ownership and persistence. The native production database read-replica tool supports read-only aggregate verification but lacks transaction control and PGP encryption functions for safe full private row export, so a separately authorized consistent, privately protected production snapshot is required. Prior aggregate checks established 17 historic receipts and 14 audit events; do not substitute development's 24 receipts and zero audit events.
+
+Independent runtime key custody, hosted private Git authority and backup, complete durable SMTP retry/leasing and session lifecycle, Stripe subscription/event commercial continuity, real production import, restart/replay/rollback, approved upstream ForgeProof release, separately integrated LifeOS consumer and independent Darwin GO are still outstanding. Keep issue #2 and draft PR #14 open until actual acceptance.
+
+No production deployment, live Stripe operation, customer migration, new scheduler, release signoff or model-authorship provenance attestation occurred as part of this source-only change.

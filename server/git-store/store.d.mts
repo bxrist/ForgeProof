@@ -1,5 +1,5 @@
 /// <reference types="node" />
-export type RecordClass = 'users' | 'repositories' | 'organizations' | 'orgMembers' | 'apiKeys' | 'subscriptions' | 'auditLogs' | 'sessions' | 'receipts';
+export type RecordClass = 'users' | 'repositories' | 'organizations' | 'orgMembers' | 'apiKeys' | 'subscriptions' | 'auditLogs' | 'sessions' | 'receipts' | 'pendingEmails' | 'receiptAnnotations';
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export interface AppRecord { id: string | number; [field: string]: Json }
 export interface Checkpoint { commit: string; eventHash: string; sequence: number }

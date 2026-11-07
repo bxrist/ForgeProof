@@ -36,9 +36,12 @@ const fields = {
   auditLogs: `id userId action resourceType resourceId detailsRef ipAddress ${common}`,
   sessions: `id userId expiresAt custodianRef ${common}`,
   receipts: 'id original',
+  receiptAnnotations: 'id receiptEntryHash gitCommitUrl gitCommitMessage createdAt',
+  pendingEmails: 'id status retryCount nextRetryAt createdAt originalDigest encryption',
 };
 export const classes = Object.freeze(Object.keys(fields));
 const numbers = new Set('orgId githubId repositoryId attestationLimit attestationCount apiKeyLimit billingEventCreated'.split(' '));
+const receiptCommitUrl = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/commit\/([a-f0-9]{40}|[a-f0-9]{64})$/;
 export function validateRecord(kind, record) {
   if (!classes.includes(kind)) throw new Error('Unknown record class');
   // Protected historical receipts retain a verified redacted signed core and
@@ -59,6 +62,29 @@ export function validateRecord(kind, record) {
     if (core.id !== record.id || core.metadata !== null) throw new Error('Invalid protected audit identity');
     const {metadata: _protected, ...safe} = core;
     return validateRecord('auditLogs', safe);
+  }
+  if (kind === 'receiptAnnotations') {
+    exact(record, ['id','receiptEntryHash','gitCommitUrl','gitCommitMessage','createdAt']);
+    positive(record.id);
+    if (typeof record.receiptEntryHash !== 'string' || !/^[a-f0-9]{64}$/.test(record.receiptEntryHash)) throw new Error('Invalid annotation receipt hash');
+    const pieces = typeof record.gitCommitUrl === 'string' ? receiptCommitUrl.exec(record.gitCommitUrl) : null;
+    if (!pieces || [pieces[1],pieces[2]].some(component => component === '.' || component === '..'))
+      throw new Error('Invalid annotation git commit URL');
+    if (record.gitCommitMessage !== null && (typeof record.gitCommitMessage !== 'string' || record.gitCommitMessage.length < 1 || record.gitCommitMessage.length > 1024)) throw new Error('Invalid annotation git commit message');
+    if (typeof record.createdAt !== 'string' || !Number.isFinite(Date.parse(record.createdAt))) throw new Error('Invalid annotation timestamp');
+    return;
+  }
+  if (kind === 'pendingEmails') {
+    exact(record, ['id','status','retryCount','nextRetryAt','createdAt','originalDigest','encryption']);
+    positive(record.id);
+    if (!['pending','sent','failed'].includes(record.status)) throw new Error('Invalid pending email status');
+    if (!Number.isSafeInteger(record.retryCount) || record.retryCount < 0) throw new Error('Invalid pending email retryCount');
+    if (typeof record.nextRetryAt !== 'string' || !Number.isFinite(Date.parse(record.nextRetryAt))) throw new Error('Invalid pending email nextRetryAt');
+    if (typeof record.createdAt !== 'string' || !Number.isFinite(Date.parse(record.createdAt))) throw new Error('Invalid pending email createdAt');
+    if (typeof record.originalDigest !== 'string' || !/^hmac-sha256:[a-f0-9]{64}$/.test(record.originalDigest)) throw new Error('Invalid pending email originalDigest');
+    if (!record.encryption || typeof record.encryption !== 'object' || Array.isArray(record.encryption)) throw new Error('Invalid pending email encryption');
+    exact(record.encryption, ['version','algorithm','nonce','tag','ciphertext','ciphertextSha256']);
+    return;
   }
   exact(record, fields[kind].split(' '));
   if (kind === 'users' || kind === 'sessions') identifier(record.id); else positive(record.id);

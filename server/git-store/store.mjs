@@ -3,6 +3,7 @@ import { realpath } from 'node:fs/promises';
 import { canonical, hash, exact, identifier, positive, signatureValid, validateRecord, validateReceipt, classes } from './schema.mjs';
 import { verifyProtectedReceiptCore } from './protected-receipt.mjs';
 import { verifyProtectedAuditCore } from './protected-audit.mjs';
+import { verifyProtectedEmailCore } from './protected-email.mjs';
 const receiptSignedCore = record => Object.prototype.hasOwnProperty.call(record, 'originalCore') ? verifyProtectedReceiptCore(record) : validateReceipt(record);
 const ZERO = '0'.repeat(40);
 export const MAX_EVENT_BYTES = 8 * 1024 * 1024;
@@ -136,12 +137,26 @@ export class GitAppStateService {
       if (op.expectedVersion !== (state.versions[address] ?? null)) throw new ConflictError('Record version conflict: ' + address);
       const existing = state.records[op.kind][op.id];
       if (op.action === 'delete') {
-        if (!existing || ['receipts','auditLogs'].includes(op.kind) || op.record !== undefined) throw new Error('Invalid deletion');
+        if (!existing || ['receipts','auditLogs','pendingEmails','receiptAnnotations'].includes(op.kind) || op.record !== undefined) throw new Error('Invalid deletion');
         delete state.records[op.kind][op.id];
       } else if (op.action === 'put') {
         validateRecord(op.kind, op.record);
+        if (op.kind === 'pendingEmails') verifyProtectedEmailCore(op.record);
         if (op.kind === 'auditLogs' && Object.prototype.hasOwnProperty.call(op.record, 'auditCore')) verifyProtectedAuditCore(op.record);
         if (op.kind === 'auditLogs' && existing) throw new Error('Audit logs are immutable');
+        if (op.kind === 'pendingEmails' && !existing) {
+          if (op.record.status !== 'pending' || op.record.retryCount !== 0)
+            throw new IntegrityError('New private email must begin pending with zero attempts');
+          if (Object.values(state.records.pendingEmails).some(v=>v.encryption?.nonce===op.record.encryption.nonce))
+            throw new IntegrityError('Encrypted email nonce reuse forbidden');
+        }
+        if (op.kind === 'pendingEmails' && existing) {
+          if (canonical(existing.encryption) !== canonical(op.record.encryption)) throw new ConflictError('Pending email encryption immutable');
+          if (existing.originalDigest !== op.record.originalDigest ||
+              existing.createdAt !== op.record.createdAt) throw new ConflictError('Pending email source identity immutable');
+          if (existing.status !== 'pending') throw new ConflictError('Pending email terminal status immutable');
+          if (op.record.retryCount < existing.retryCount) throw new ConflictError('Pending email retries cannot decrease');
+        }
         if (op.record.id !== op.id) throw new Error('Record ID mismatch');
         if (op.kind === 'receipts') {
           if (existing) throw new Error('Receipts are immutable');
@@ -160,6 +175,16 @@ export class GitAppStateService {
           if (r.prevEntryHash !== state.receiptHead) throw new IntegrityError('Historical receipt predecessor mismatch');
           if (Object.values(state.records.receipts).some(v => receiptSignedCore(v).entryHash === r.entryHash)) throw new Error('Duplicate receipt hash');
           state.receiptHead = r.entryHash;
+        }
+        if (op.kind === 'receiptAnnotations') {
+          if (existing) throw new Error('Receipt annotations are immutable');
+          const annotation = op.record;
+          const signedReceipt=state.records.receipts[annotation.id];
+          if (!signedReceipt) throw new IntegrityError('Missing annotated receipt');
+          if (receiptSignedCore(signedReceipt).entryHash !== annotation.receiptEntryHash)
+            throw new IntegrityError('Annotated receipt hash mismatch');
+          if (Object.values(state.records.receiptAnnotations).some(v => v.receiptEntryHash === annotation.receiptEntryHash))
+            throw new Error('Receipt already annotated');
         }
         state.records[op.kind][op.id] = structuredClone(op.record);
       } else throw new Error('Unknown action');

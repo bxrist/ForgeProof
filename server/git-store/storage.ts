@@ -4,6 +4,18 @@ import type { IStorage } from '../storage';
 import type { User } from '../../shared/models/auth';
 import type * as S from '../../shared/schema';
 import { GitAppStateService, ConflictError, type AppRecord, type RecordClass, type Replay, type Operation } from './store.mjs';
+import { protectQueuedEmail, restoreQueuedEmail } from './protected-email.mjs';
+// Optional isolated Git-only delivery types. The public production SQL schema
+// must NOT be expanded or migrated to support this unreleased adapter.
+type PrivatePendingEmail = {
+  id: number; to: string; subject: string; bodyText: string; bodyHtml: string;
+  status: 'pending' | 'sent' | 'failed'; retryCount: number;
+  nextRetryAt: Date; createdAt: Date;
+};
+type InsertPrivatePendingEmail = Omit<PrivatePendingEmail,'id'|'createdAt'> & {
+  status?: 'pending' | 'sent' | 'failed'; retryCount?: number; nextRetryAt?: Date;
+};
+import { protectLegacyAuditLog } from './protected-audit.mjs';
 
 function stable(v: unknown): string {
   if (Array.isArray(v)) return '['+v.map(stable).join(',')+']';
@@ -23,7 +35,7 @@ const unsupported = (): never => { throw new Error('Secure credential custody or
 /** A tenant-scoped IStorage implementation. The independently configured membership
  * allowlist is mandatory; it is never inferred from request data or untrusted Git. */
 export class GitStorage implements IStorage {
-  constructor(readonly service: Pick<GitAppStateService, 'replay' | 'append'>, readonly principal: string, readonly members: readonly string[], readonly guardUserId: string, readonly custody: CredentialCustodian = new UnavailableCustodian(), readonly custodyScope: string = '') {
+  constructor(readonly service: Pick<GitAppStateService, 'replay' | 'append'>, readonly principal: string, readonly members: readonly string[], readonly guardUserId: string, readonly custody: CredentialCustodian = new UnavailableCustodian(), readonly custodyScope: string = '', readonly mailEncryptionKey?: Buffer, readonly auditEncryptionKey?: Buffer) {
     if (!members.length || !members.includes(principal) || !members.includes(guardUserId)) throw new Error('Tenant authorization denied');
   }
   private authorize(id: string) { if (!this.members.includes(id)) throw new Error('Tenant authorization denied'); }
@@ -141,12 +153,34 @@ export class GitStorage implements IStorage {
   updateRepositoryLastSynced(id: number) { return this.update('repositories',id,{lastSyncedAt:new Date()}); }
   deleteRepository(id: number) { return this.remove('repositories',id); }
   private async receipts() { return Object.values((await this.state()).records.receipts).map(r=>decode<S.AttestationReceipt>(JSON.parse(String(r.originalCore ?? r.original)))!); }
-  async getAttestations(userId: string) { this.authorize(userId); return (await this.receipts()).filter(r=>r.userId===userId).reverse(); }
+  private async receiptAnnotations() { return Object.values((await this.state()).records.receiptAnnotations ?? {}); }
+  private async receiptOverlay(receipts: S.AttestationReceipt[]) {
+    const map = new Map<string,{gitCommitUrl:string,gitCommitMessage:string | null}>();
+    for (const row of await this.receiptAnnotations()) map.set(String(row.receiptEntryHash), { gitCommitUrl: String(row.gitCommitUrl), gitCommitMessage: row.gitCommitMessage==null ? null : String(row.gitCommitMessage) });
+    return receipts.map(r => {
+      const annotation = map.get(r.entryHash);
+      return annotation ? ({...r,gitCommitUrl: annotation.gitCommitUrl,gitCommitMessage: annotation.gitCommitMessage}) : r;
+    });
+  }
+  async getAttestations(userId: string) { this.authorize(userId); return (await this.receiptOverlay(await this.receipts())).filter(r=>r.userId===userId).reverse(); }
   async getSystemAttestations() { return this.members.includes('forgeproof-system') ? this.getAttestations('forgeproof-system') : []; }
-  async getAllAttestationsOrdered() { return (await this.receipts()).sort((a,b)=>a.id-b.id); }
-  async getAttestation(id: number) { return (await this.receipts()).find(r=>r.id===id); }
-  async getAttestationByEntryHash(hash: string) { return (await this.receipts()).find(r=>r.entryHash===hash); }
-  async getAttestationsByParentId(id: number) { return (await this.receipts()).filter(r=>r.parentAttestationId===id); }
+  async getAllAttestationsOrdered() { return (await this.receiptOverlay(await this.receipts())).sort((a,b)=>a.id-b.id); }
+  async getAttestation(id: number) { return (await this.receiptOverlay(await this.receipts())).find(r=>r.id===id); }
+  /** Replit's ForgeProof lineage query must preserve repository and owner boundaries. */
+  async getAttestationsByFilePath(filePath: string, userId: string, repositoryId: number | null): Promise<S.AttestationReceipt[]> {
+    this.authorize(userId);
+    return (await this.receiptOverlay(await this.receipts()))
+      .filter(r => r.filePath===filePath && (r.repositoryId ?? null)===repositoryId &&
+        (r.userId===userId || (r.userId==='forgeproof-system' && this.members.includes('forgeproof-system'))))
+      .sort((a,b)=>a.id-b.id);
+  }
+  async getAttestationByEntryHash(hash: string) { return (await this.receiptOverlay(await this.receipts())).find(r=>r.entryHash===hash); }
+  async getAttestationsByParentId(id: number, ownerId: string = this.principal): Promise<S.AttestationReceipt[]> {
+    this.authorize(ownerId);
+    return (await this.receiptOverlay(await this.receipts()))
+      .filter(r=>r.parentAttestationId===id && r.userId===ownerId)
+      .sort((a,b)=>a.id-b.id);
+  }
   async getLatestAttestation() { return (await this.getAllAttestationsOrdered()).at(-1); }
   createAttestation(data: S.InsertAttestationReceipt) { return this.createAttestationAndCount(data,randomUUID()); }
   createAttestationAndCount(data: S.InsertAttestationReceipt,key: string) {
@@ -158,7 +192,30 @@ export class GitStorage implements IStorage {
       return {operations:[this.put(state,'receipts',{id:receipt.id,original:JSON.stringify(receipt)}),this.put(state,'subscriptions',{...sub,attestationCount:Number(sub.attestationCount)+1})],result:decode<S.AttestationReceipt>(receipt)!};
     },key);
   }
-  async updateAttestationGitCommitUrl(_id: number,_url: string,_message?: string): Promise<void> { return unsupported(); }
+  async updateAttestationGitCommitUrl(id: number,url: string,message?: string): Promise<void> {
+    if (this.principal !== this.guardUserId) throw new Error('Only owner may annotate receipt git commits');
+    if (typeof url !== 'string') throw new Error('Invalid git commit URL');
+    const matched = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/commit\/([a-fA-F0-9]{40}|[a-fA-F0-9]{64})$/.exec(url);
+    if (!matched || [matched[1],matched[2]].some(c => c === '.' || c === '..')) throw new Error('Invalid git commit URL');
+    // Git objects are case-insensitive hexadecimal, but canonical signed-Git
+    // annotations store lowercase SHA and treat case variants idempotently.
+    const normalized = `https://github.com/${matched[1]}/${matched[2]}/commit/${matched[3].toLowerCase()}`;
+    if (message !== undefined && message !== null && (typeof message !== 'string' || message.length < 1 || message.length > 1024)) throw new Error('Invalid git commit message');
+    const normalizedMessage = message == null ? null : message;
+    await this.mutate('annotate-receipt',{id,url:normalized,message:normalizedMessage},state => {
+      const receiptRecord = state.records.receipts[id];
+      if (!receiptRecord) throw new Error('Receipt not found');
+      const receipt = decode<S.AttestationReceipt>(JSON.parse(String(receiptRecord.originalCore ?? receiptRecord.original)))!;
+      if (receipt.userId !== this.principal) throw new Error('Only receipt owner may annotate');
+      const existing = Object.values(state.records.receiptAnnotations ?? {}).find((v:AppRecord)=>v.receiptEntryHash===receipt.entryHash);
+      if (existing) {
+        if (existing.gitCommitUrl===normalized && (existing.gitCommitMessage ?? null)===normalizedMessage) return {operations:[],result:undefined};
+        throw new Error('Conflicting receipt annotation exists');
+      }
+      const annotation = encode({id:receipt.id,receiptEntryHash:receipt.entryHash,gitCommitUrl:normalized,gitCommitMessage:normalizedMessage,createdAt:new Date()});
+      return {operations:[this.put(state,'receiptAnnotations',annotation)],result:undefined};
+    });
+  }
   private custodyBinding() { if (!this.custodyScope) throw new Error('Secure credential custody binding unavailable'); return this.custodyScope; }
   private keyView(record: AppRecord): S.ApiKey {
     // IStorage compatibility: no verifier or prefix is returned, even to internal callers.
@@ -272,7 +329,40 @@ export class GitStorage implements IStorage {
   addOrgMember(data: S.InsertOrgMember) { return this.create<S.OrgMember>('orgMembers',data,{role:'member'}); }
   async removeOrgMember(id: number,userId: string) { const member=await this.getOrgMember(id,userId); if (member) await this.remove('orgMembers',member.id); }
   async updateOrgMemberRole(id: number,userId: string,role: string) { const member=await this.getOrgMember(id,userId); if (!member) throw new Error('Member not found'); await this.update('orgMembers',member.id,{role}); }
-  createAuditLog(data: S.InsertAuditLog) { if (data.metadata != null) unsupported(); const {metadata,...safe}=data; return this.create<S.AuditLog>('auditLogs',safe,{userId:null,resourceType:null,resourceId:null,ipAddress:null}); }
+  async createAuditLog(data: S.InsertAuditLog) {
+    if (data == null || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid audit metadata input');
+    if (data.metadata == null) {
+      const {metadata,...safe}=data;
+      return this.create<S.AuditLog>('auditLogs',safe,{userId:null,resourceType:null,resourceId:null,ipAddress:null})
+        .then(row=>({...row,metadata:null}));
+    }
+    const auditKey = this.auditEncryptionKey;
+    if (!Buffer.isBuffer(auditKey) || auditKey.length !== 32) throw new Error('Private Git-backed audit metadata unavailable');
+    const allowed = new Set(['userId','action','resourceType','resourceId','metadata','ipAddress']);
+    const keys = Object.keys(data as Record<string, unknown>);
+    if (keys.some(k=>!allowed.has(k))) throw new Error('Invalid audit metadata input');
+    if (typeof data.action !== 'string' || !data.action.trim() || data.action.length > 65536)
+      throw new Error('Invalid audit action');
+    const scope = this.mailBinding();
+    const requestToken = randomUUID();
+    return this.mutate<S.AuditLog>('create-protected-audit',{requestToken},state => {
+      const id = this.next(state,'auditLogs');
+      const createdAt = new Date();
+      const row: S.AuditLog = {
+        id,
+        userId: data.userId ?? null,
+        action: data.action,
+        resourceType: data.resourceType ?? null,
+        resourceId: data.resourceId ?? null,
+        metadata: data.metadata,
+        ipAddress: data.ipAddress ?? null,
+        createdAt,
+      };
+      const core = Buffer.from(JSON.stringify(row));
+      const protectedRecord = protectLegacyAuditLog(core, scope.tenant, scope.repository, auditKey);
+      return {operations:[this.put(state,'auditLogs',encode(protectedRecord))], result:row};
+    });
+  }
   async getAuditLogs(userId?: string,limit=100) {
     if (userId) this.authorize(userId);
     // this.state() performs full signed Git replay and verifies protected audit
@@ -331,5 +421,91 @@ export class GitStorage implements IStorage {
   async getOrCreateFreeSubscription(userId: string) {
     const old=await this.getSubscription(userId); if(old) return old;
     try { return await this.createSubscription({userId}); } catch(e) { const raced=await this.getSubscription(userId); if(raced) return raced; throw e; }
+  }
+  private requireMailKey() {
+    if (!Buffer.isBuffer(this.mailEncryptionKey) || this.mailEncryptionKey.length !== 32) throw new Error('Durable Git-backed pending-email queue unavailable');
+    return this.mailEncryptionKey;
+  }
+  private mailBinding(): {tenant:string; repository:string} {
+    // Bind encryption to the verified signed-Git stream, not a user ID or
+    // generic custody namespace that might be reused in another tenant.
+    const scope = this.service as typeof this.service & {tenant?:unknown; repository?:unknown};
+    if (typeof scope.tenant !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(scope.tenant) ||
+        typeof scope.repository !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(scope.repository))
+      throw new Error('Private Git mail scope unavailable');
+    return {tenant:scope.tenant,repository:scope.repository};
+  }
+
+  private decodePendingEmail(record: AppRecord): PrivatePendingEmail {
+    const key = this.requireMailKey();
+    const scope = this.mailBinding();
+    const restored = restoreQueuedEmail(record, scope.tenant, scope.repository, key);
+    return {
+      id: Number(record.id),
+      to: restored.to,
+      subject: restored.subject,
+      bodyText: restored.bodyText,
+      bodyHtml: restored.bodyHtml,
+      status: String(record.status) as PrivatePendingEmail['status'],
+      retryCount: Number(record.retryCount),
+      nextRetryAt: new Date(String(record.nextRetryAt)),
+      createdAt: new Date(String(record.createdAt)),
+    };
+  }
+
+  async createPendingEmail(email: InsertPrivatePendingEmail): Promise<PrivatePendingEmail> {
+    const key = this.requireMailKey();
+    const scope = this.mailBinding();
+    if ((email.status ?? 'pending') !== 'pending' || (email.retryCount ?? 0) !== 0)
+      throw new Error('New pending email must begin pending with zero attempts');
+    const requestToken = randomUUID();
+    // Keep original private content exclusively in this closure. The stored
+    // signed Git request and audit fingerprint contain only random request ID.
+    return this.mutate<PrivatePendingEmail>('create-pending-email',{requestToken},state => {
+      const id = this.next(state,'pendingEmails');
+      const createdAt = new Date();
+      const nextRetryAt = email.nextRetryAt ?? createdAt;
+      const status = 'pending';
+      const retryCount = 0;
+      const protectedRecord = protectQueuedEmail({to:email.to,subject:email.subject,bodyText:email.bodyText,bodyHtml:email.bodyHtml}, scope.tenant, scope.repository, id, key);
+      const row = encode({id,status,retryCount,nextRetryAt,createdAt,...protectedRecord});
+      return { operations:[this.put(state,'pendingEmails',row)], result:this.decodePendingEmail(row) };
+    });
+  }
+
+  async getDuePendingEmails(): Promise<PrivatePendingEmail[]> {
+    this.requireMailKey();
+    const now = Date.now();
+    const rows = await this.rows<AppRecord>('pendingEmails');
+    return rows
+      .filter(r => r.status === 'pending' && Date.parse(String(r.nextRetryAt)) <= now)
+      .sort((a,b) => Number(a.id)-Number(b.id))
+      .map(r => this.decodePendingEmail(encode(r)));
+  }
+
+  async updatePendingEmail(id: number, data: Partial<InsertPrivatePendingEmail>): Promise<void> {
+    this.requireMailKey();
+    this.mailBinding();
+    const allowed = new Set(['status','retryCount','nextRetryAt']);
+    if (data == null || typeof data !== 'object' || Array.isArray(data) ||
+        Object.keys(data).some(k=>!allowed.has(k))) throw new Error('Pending email content immutable');
+    const safe = encode(data);
+    if (!Number.isSafeInteger(id) || id < 1) throw new Error('Invalid pending email id');
+    return this.mutate<void>('update-pending-email',{id,data:safe},state => {
+      const old = state.records.pendingEmails[id];
+      if (!old) throw new Error('Pending email not found');
+      if (old.status !== 'pending') throw new Error('Pending email terminal status immutable');
+      const next = encode({
+        ...old,
+        status: safe.status ?? old.status,
+        retryCount: safe.retryCount ?? old.retryCount,
+        nextRetryAt: safe.nextRetryAt ?? old.nextRetryAt,
+      });
+      const terminal = new Set(['sent','failed']);
+      if (terminal.has(String(old.status)) && next.status !== old.status) throw new Error('Pending email terminal status immutable');
+      if (old.status === 'pending' && !['pending','sent','failed'].includes(String(next.status))) throw new Error('Invalid pending status transition');
+      if (Number(next.retryCount) < Number(old.retryCount)) throw new Error('Pending email retryCount must be monotonic');
+      return { operations:[this.put(state,'pendingEmails',next)], result:undefined };
+    });
   }
 }
