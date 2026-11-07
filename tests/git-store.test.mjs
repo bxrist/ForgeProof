@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { execFile, execFileSync } from 'node:child_process';
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { GitAppStateService, ConflictError } from '../server/git-store/store.mjs';
+import { GitAppStateService, ConflictError, MAX_EVENT_BYTES } from '../server/git-store/store.mjs';
 import { canonical, hash } from '../server/git-store/schema.mjs';
 import { main } from '../server/git-store/cli.mjs';
 const keys = generateKeyPairSync('ed25519', { publicKeyEncoding: { type: 'spki', format: 'pem' }, privateKeyEncoding: { type: 'pkcs8', format: 'pem' } });
@@ -208,6 +208,78 @@ test('migration CLI preflights, preserves historical IDs/bytes, resumes idempote
   // Execute the actual dependency-free CLI in another process.
   const verified = await promisify(execFile)('node', ['server/git-store/cli.mjs','verify',directory,config,join(root,'external-verification')], { env: { PATH: process.env.PATH } });
   assert.equal(JSON.parse(verified.stdout).verified,true);
+});
+
+test('migration rejects an oversized later envelope without committing an earlier event, including resume', async t => {
+  const { root, directory, service, options } = await fixture(t);
+  const config = join(root, 'config.json'), input = join(root, 'export.json'), signingModule = join(root, 'signer.mjs');
+  await writeFile(config, JSON.stringify({ tenant: options.tenant, repository: options.repository, trust, checkpoint: null }));
+  await writeFile(signingModule, `import { sign } from 'node:crypto'; export const signer = { actor: 'fixture-writer', keyId: 'fixture-key', sign: async bytes => sign(null, bytes, ${JSON.stringify(keys.privateKey)}).toString('base64') };`, { mode: 0o600 });
+  const first = tx('migration-1', put(1));
+  const later = tx('migration-2', put(2, 'é'.repeat(1000)));
+  const run = async (transactions, output) => {
+    await writeFile(input, JSON.stringify({ version: 1, transactions }));
+    return main(['migrate', directory, config, join(root, output), input, signingModule], { maxEventBytes: 2048 });
+  };
+  await assert.rejects(run([first, later], 'oversized'), /Event too large/);
+  assert.equal(await service.head(), null);
+  assert.equal(await git(directory, 'count-objects', '-v').then(v => v.split('\n')[0]), 'count: 0');
+  // A real interrupted migration may have a valid prefix. Invalid input must leave it intact.
+  const prefix = await service.append(first);
+  await assert.rejects(run([first, tx('migration-3', put(3)), later], 'resume-bad'), /Event too large/);
+  assert.equal(await service.head(), prefix.checkpoint.commit);
+  const tail = tx('migration-2', put(2));
+  const resumed = await run([first, tail, tail], 'resume-good');
+  const retried = await run([first, tail], 'retry');
+  assert.deepEqual(resumed.checkpoint, retried.checkpoint);
+  assert.equal(resumed.verifiedEvents, 2);
+  await assert.rejects(run([first, tx('migration-2', put(4))], 'conflict'), /idempotency conflict/);
+  assert.equal(await service.head(), resumed.checkpoint.commit);
+});
+
+test('preflight counts exact envelope bytes, previous hash and sequence/header growth', async t => {
+  const { service, options } = await fixture(t);
+  const first = tx('size-one', put(1));
+  const state = await service.replay();
+  const event = await service.prepareEvent(state, first);
+  const bytes = Buffer.byteLength(canonical(event));
+  // The exact signed boundary is accepted; one byte less is rejected by both paths.
+  const exactService = new GitAppStateService({ ...options, maxEventBytes: bytes });
+  await exactService.preflight([first]);
+  const small = new GitAppStateService({ ...options, maxEventBytes: bytes - 1 });
+  await assert.rejects(small.preflight([first]), /Event too large/);
+  await assert.rejects(small.append(first), /Event too large/);
+  // Same-sized operations/key, but the second previous hash replaces null with 64 hex bytes.
+  await assert.rejects(exactService.preflight([first, tx('size-two', put(2))]), /Event too large/);
+  const transactions = Array.from({ length: 10 }, (_, i) => tx('sequence-' + i, put(1, 'Example', i || null)));
+  // Compute a sequence-9 envelope, then check the extra sequence/expectedVersion digits at 10.
+  const ninthState = await service.replay();
+  ninthState.checkpoint = { commit: '0'.repeat(40), eventHash: 'a'.repeat(64), sequence: 8 };
+  ninthState.versions['organizations/1'] = 8;
+  const ninth = await service.prepareEvent(ninthState, transactions[8]);
+  const sequenceLimit = new GitAppStateService({ ...options, maxEventBytes: Buffer.byteLength(canonical(ninth)) });
+  await sequenceLimit.preflight(transactions.slice(0, 9));
+  await assert.rejects(sequenceLimit.preflight(transactions), /Event too large/);
+  assert.equal(await service.head(), null);
+});
+
+test('preflight rejects a later invalid signer result before writing history', async t => {
+  const { service, options, directory } = await fixture(t);
+  let calls = 0;
+  const producer = new GitAppStateService({ ...options, signer: { ...signer, sign: async bytes => ++calls === 2 ? 'AAAA' : signer.sign(bytes) } });
+  await assert.rejects(producer.preflight([tx('producer-one', put(1)), tx('producer-two', put(2))]), /Signer not authorized/);
+  assert.equal(calls, 2);
+  assert.equal(await service.head(), null);
+  assert.equal(await git(directory, 'count-objects', '-v').then(v => v.split('\n')[0]), 'count: 0');
+});
+
+test('production size ceiling cannot be raised and rejects the reported oversized transaction', async t => {
+  const { service, options } = await fixture(t);
+  assert.equal(MAX_EVENT_BYTES, 8 * 1024 * 1024);
+  assert.throws(() => new GitAppStateService({ ...options, maxEventBytes: MAX_EVENT_BYTES + 1 }), /Invalid event size limit/);
+  const large = tx('large-later', ...Array.from({ length: 150 }, (_, i) => put(i + 2, 'x'.repeat(60000))));
+  await assert.rejects(service.preflight([tx('small-first', put(1)), large]), /Event too large/);
+  assert.equal(await service.head(), null);
 });
 
 test('delete tombstones prevent stale resurrection; transaction failure publishes nothing', async t => {

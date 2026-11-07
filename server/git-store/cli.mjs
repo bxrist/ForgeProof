@@ -5,9 +5,9 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { GitAppStateService } from './store.mjs';
 import { reviewedSnapshotTransactions } from './snapshot.mjs';
-import { canonical, exact, identifier } from './schema.mjs';
+import { canonical, exact } from './schema.mjs';
 
-export async function main(args) {
+export async function main(args, { maxEventBytes } = {}) {
   const [command, directory, configPath, outputPath, inputPath, signerModule] = args;
   if (!['verify','restore','migrate','migrate-reviewed'].includes(command) || !directory || !configPath || !outputPath) throw new Error('Usage: node server/git-store/cli.mjs verify|restore STORE CONFIG OUTPUT; migrate STORE CONFIG CHECKPOINT INPUT SIGNER_MODULE');
   const config = JSON.parse(await readFile(configPath, 'utf8'));
@@ -17,27 +17,14 @@ export async function main(args) {
     if (!inputPath || !signerModule) throw new Error('Migration requires fixture/export and external signer module');
     signer = (await import(pathToFileURL(resolve(signerModule)).href)).signer;
   }
-  const service = new GitAppStateService({ ...config, directory: resolve(directory), signer });
+  const service = new GitAppStateService({ ...config, directory: resolve(directory), signer, maxEventBytes });
   if (['migrate','migrate-reviewed'].includes(command)) {
     const input = JSON.parse(await readFile(inputPath, 'utf8'));
     const migration = command === 'migrate-reviewed' ? reviewedSnapshotTransactions(input) : input;
     exact(migration, ['version','transactions']);
     if (migration.version !== 1 || !Array.isArray(migration.transactions)) throw new Error('Unsupported migration format');
-    // Preflight the entire export, so invalid later records cannot partially import.
-    const state = await service.replay();
-    const seen = new Map(state.events.map(e => [e.body.idempotencyKey, e.body]));
-    let seq = state.checkpoint?.sequence ?? 0;
-    for (const tx of migration.transactions) {
-      exact(tx, ['idempotencyKey','operations']);
-      identifier(tx.idempotencyKey);
-      const old = seen.get(tx.idempotencyKey);
-      if (old) {
-        if (old.actor !== signer.actor || canonical(old.operations) !== canonical(tx.operations)) throw new Error('Migration idempotency conflict');
-        continue;
-      }
-      service.apply(state, tx.operations, ++seq);
-      seen.set(tx.idempotencyKey, { actor: signer.actor, operations: tx.operations });
-    }
+    // Includes exact signed envelope sizes and all records, before the first durable append.
+    await service.preflight(migration.transactions);
     for (const tx of migration.transactions) await service.append(tx);
   }
   const state = await service.replay();

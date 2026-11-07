@@ -20,6 +20,8 @@ export interface Options {
   trust: Trust;
   checkpoint: Checkpoint | null;
   signer?: Signer;
+  /** May only lower the production 8 MiB limit. */
+  maxEventBytes?: number;
 }
 export interface Event {
   body: Transaction & { version: 1; tenant: string; repository: string; sequence: number; previous: string | null; actor: string; keyId: string; requestHash: string };
@@ -32,11 +34,13 @@ export interface Replay {
   events: Event[];
   receiptHead: string | null;
 }
+export const MAX_EVENT_BYTES: number;
 export class ConflictError extends Error {}
 export class IntegrityError extends Error {}
 export class GitAppStateService {
   constructor(options: Options);
   replay(): Promise<Replay>;
+  preflight(transactions: Transaction[]): Promise<void>;
   get(kind: RecordClass, id: string | number): Promise<AppRecord | undefined>;
   list(kind: RecordClass): Promise<AppRecord[]>;
   append(transaction: Transaction): Promise<{ checkpoint: Checkpoint; event: Event; duplicate: boolean }>;

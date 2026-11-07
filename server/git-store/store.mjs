@@ -2,13 +2,16 @@ import { execFile } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import { canonical, hash, exact, identifier, positive, signatureValid, validateRecord, validateReceipt, classes } from './schema.mjs';
 const ZERO = '0'.repeat(40);
+export const MAX_EVENT_BYTES = 8 * 1024 * 1024;
 export class ConflictError extends Error {}
 export class IntegrityError extends Error {}
 /** Explicit nonproduction service. A separate private bare repository is mandatory. */
 export class GitAppStateService {
-  constructor({ directory, tenant, repository, trust, checkpoint, signer }) {
+  constructor({ directory, tenant, repository, trust, checkpoint, signer, maxEventBytes = MAX_EVENT_BYTES }) {
     if (process.env.NODE_ENV === 'production') throw new Error('Experimental Git app state is disabled in production');
     identifier(tenant); identifier(repository);
+    if (!Number.isSafeInteger(maxEventBytes) || maxEventBytes < 1 || maxEventBytes > MAX_EVENT_BYTES) throw new Error('Invalid event size limit');
+    this.maxEventBytes = maxEventBytes;
     if (checkpoint === undefined) throw new Error('Explicit trusted checkpoint (or null for bootstrap) required');
     if (checkpoint !== null) {
       exact(checkpoint, ['commit','eventHash','sequence']);
@@ -76,7 +79,7 @@ export class GitAppStateService {
       const tree = await this.git(['ls-tree', commit]);
       if (!/^100644 blob [a-f0-9]{40}\tevent.json$/.test(tree)) throw new IntegrityError('Unexpected tree content');
       const raw = await this.git(['show', `${commit}:event.json`]);
-      if (Buffer.byteLength(raw) > 8 * 1024 * 1024) throw new IntegrityError('Event too large');
+      if (Buffer.byteLength(raw) > this.maxEventBytes) throw new IntegrityError('Event too large');
       const event = JSON.parse(raw);
       exact(event, ['body','signature']);
       if (raw !== canonical(event)) throw new IntegrityError('Noncanonical event');
@@ -142,6 +145,46 @@ export class GitAppStateService {
       state.versions[address] = sequence;
     }
   }
+  /** Shared append/preflight validation, including the complete signed envelope. No Git writes. */
+  async prepareEvent(state, { idempotencyKey, operations }) {
+    identifier(idempotencyKey);
+    if (!this.signer) throw new Error('Read-only service');
+    const { actor, keyId } = this.signer;
+    identifier(actor); identifier(keyId);
+    const sequence = (state.checkpoint?.sequence ?? 0) + 1;
+    positive(sequence);
+    this.apply(state, operations, sequence);
+    const body = { version: 1, tenant: this.tenant, repository: this.repository, sequence, previous: state.checkpoint?.eventHash ?? null, actor, keyId, idempotencyKey, requestHash: hash(canonical({ actor, operations })), operations };
+    const payload = canonical(body);
+    // Preserve the existing body ceiling as well as enforcing the full envelope limit.
+    if (Buffer.byteLength(payload) > MAX_EVENT_BYTES - 1024) throw new Error('Event too large');
+    const signature = await this.signer.sign(Buffer.from(payload));
+    const key = this.trust.eventKeys?.[keyId];
+    if (!key || key.actor !== actor || !signatureValid(payload, signature, key.publicKey)) throw new IntegrityError('Signer not authorized');
+    const event = { body, signature };
+    if (Buffer.byteLength(canonical(event)) > this.maxEventBytes) throw new Error('Event too large');
+    return event;
+  }
+  /** Validate every future event before any append. Existing identical requests are skipped. */
+  async preflight(transactions) {
+    // Isolate the complete input from mutation across awaits, just as append does.
+    transactions = JSON.parse(canonical(transactions));
+    const state = await this.replay();
+    const seen = new Map(state.events.map(e => [e.body.idempotencyKey, e.body]));
+    for (const tx of transactions) {
+      exact(tx, ['idempotencyKey','operations']);
+      identifier(tx.idempotencyKey);
+      const old = seen.get(tx.idempotencyKey);
+      if (old) {
+        if (old.actor !== this.signer?.actor || canonical(old.operations) !== canonical(tx.operations)) throw new ConflictError('Migration idempotency conflict');
+        continue;
+      }
+      const event = await this.prepareEvent(state, tx);
+      // Actual signed event hashes give the next envelope its exact previous/sequence fields.
+      state.checkpoint = { commit: state.checkpoint?.commit ?? ZERO, eventHash: hash(canonical(event)), sequence: event.body.sequence };
+      seen.set(tx.idempotencyKey, event.body);
+    }
+  }
   /** Atomic transaction. Caller must supply record versions; retries never overwrite a competing update. */
   async append({ idempotencyKey, operations }, { beforeCAS } = {}) {
     identifier(idempotencyKey);
@@ -160,14 +203,8 @@ export class GitAppStateService {
         this.observe(state.checkpoint);
         return { checkpoint: state.checkpoint, event: retry, duplicate: true };
       }
-      const seq = (state.checkpoint?.sequence ?? 0) + 1;
-      this.apply(state, operations, seq);
-      const body = { version: 1, tenant: this.tenant, repository: this.repository, sequence: seq, previous: state.checkpoint?.eventHash ?? null, actor, keyId, idempotencyKey, requestHash, operations };
-      if (Buffer.byteLength(canonical(body)) > 8 * 1024 * 1024 - 1024) throw new Error('Event too large');
-      const signature = await this.signer.sign(Buffer.from(canonical(body)));
-      const key = this.trust.eventKeys?.[keyId];
-      if (!key || key.actor !== actor || !signatureValid(canonical(body), signature, key.publicKey)) throw new IntegrityError('Signer not authorized');
-      const event = { body, signature };
+      const event = await this.prepareEvent(state, { idempotencyKey, operations });
+      const seq = event.body.sequence;
       const blob = await this.git(['hash-object', '-w', '--stdin'], canonical(event));
       const tree = await this.git(['mktree'], `100644 blob ${blob}\tevent.json\n`);
       const parent = state.checkpoint?.commit;
