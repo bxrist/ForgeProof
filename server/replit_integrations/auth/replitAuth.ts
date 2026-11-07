@@ -7,6 +7,7 @@ import type { Express, RequestHandler } from "express";
 import memoize from "memoizee";
 import connectPg from "connect-pg-simple";
 import { authStorage } from "./storage";
+import { createUiLimiter, issueCsrfToken, sessionCsrfProtection } from "../../httpSecurity";
 
 const getOidcConfig = memoize(
   async () => {
@@ -35,6 +36,7 @@ export function getSession() {
     cookie: {
       httpOnly: true,
       secure: true,
+      sameSite: "lax",
       maxAge: sessionTtl,
     },
   });
@@ -63,8 +65,11 @@ async function upsertUser(claims: any) {
 export async function setupAuth(app: Express) {
   app.set("trust proxy", 1);
   app.use(getSession());
+  app.use(sessionCsrfProtection);
   app.use(passport.initialize());
   app.use(passport.session());
+  const authLimiter = createUiLimiter();
+  app.get("/api/csrf-token", authLimiter, issueCsrfToken);
 
   const config = await getOidcConfig();
 
@@ -102,7 +107,7 @@ export async function setupAuth(app: Express) {
   passport.serializeUser((user: Express.User, cb) => cb(null, user));
   passport.deserializeUser((user: Express.User, cb) => cb(null, user));
 
-  app.get("/api/login", (req, res, next) => {
+  app.get("/api/login", authLimiter, (req, res, next) => {
     ensureStrategy(req.hostname);
     passport.authenticate(`replitauth:${req.hostname}`, {
       prompt: "login consent",
@@ -110,7 +115,7 @@ export async function setupAuth(app: Express) {
     })(req, res, next);
   });
 
-  app.get("/api/callback", (req, res, next) => {
+  app.get("/api/callback", authLimiter, (req, res, next) => {
     ensureStrategy(req.hostname);
     passport.authenticate(`replitauth:${req.hostname}`, {
       successReturnToOrRedirect: "/",
@@ -118,7 +123,7 @@ export async function setupAuth(app: Express) {
     })(req, res, next);
   });
 
-  app.get("/api/logout", (req, res) => {
+  app.get("/api/logout", authLimiter, (req, res) => {
     req.logout(() => {
       res.redirect(
         client.buildEndSessionUrl(config, {
