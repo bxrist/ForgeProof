@@ -1,5 +1,8 @@
 # Milestone 0B phase 3: coordinated private Git transport
 
+Phase 4 adds opt-in credential custody and a verified bounded Stripe inbox; see
+[implementation, private operations and remaining limits](milestone-0b-phase4.md).
+
 This phase adds an executable remote coordinator, `server/git-store/remote.mjs`,
 not production cutover or milestone completion. SQL remains the default. No live
 system, GitHub remote, provider, credential, production record or external resource

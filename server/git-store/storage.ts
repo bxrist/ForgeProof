@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { UnavailableCustodian, type CredentialCustodian } from './custody';
 import type { IStorage } from '../storage';
 import type { User } from '../../shared/models/auth';
 import type * as S from '../../shared/schema';
@@ -22,7 +23,7 @@ const unsupported = (): never => { throw new Error('Secure credential custody or
 /** A tenant-scoped IStorage implementation. The independently configured membership
  * allowlist is mandatory; it is never inferred from request data or untrusted Git. */
 export class GitStorage implements IStorage {
-  constructor(readonly service: Pick<GitAppStateService, 'replay' | 'append'>, readonly principal: string, readonly members: readonly string[], readonly guardUserId: string) {
+  constructor(readonly service: Pick<GitAppStateService, 'replay' | 'append'>, readonly principal: string, readonly members: readonly string[], readonly guardUserId: string, readonly custody: CredentialCustodian = new UnavailableCustodian(), readonly custodyScope: string = '') {
     if (!members.length || !members.includes(principal) || !members.includes(guardUserId)) throw new Error('Tenant authorization denied');
   }
   private authorize(id: string) { if (!this.members.includes(id)) throw new Error('Tenant authorization denied'); }
@@ -60,7 +61,7 @@ export class GitStorage implements IStorage {
         if (org.ownerId !== r.userId && !Object.values(records.orgMembers).some(m => m.orgId === r.orgId && m.userId === r.userId)) throw new Error('Organization membership denied');
       }
     }
-    for (const [kind,field] of [['users','email'],['users','stripeCustomerId'],['organizations','slug'],['subscriptions','userId'],['subscriptions','stripeCustomerId'],['subscriptions','stripeSubscriptionId']] as const) unique(kind,field);
+    for (const [kind,field] of [['apiKeys','credentialRef'],['sessions','custodianRef'],['users','email'],['users','stripeCustomerId'],['organizations','slug'],['subscriptions','userId'],['subscriptions','stripeCustomerId'],['subscriptions','stripeSubscriptionId']] as const) unique(kind,field);
     for (const kind of ['repositories','orgMembers'] as const) {
       const seen = new Set();
       for (const r of Object.values(records[kind])) {
@@ -156,11 +157,106 @@ export class GitStorage implements IStorage {
     },key);
   }
   async updateAttestationGitCommitUrl(_id: number,_url: string,_message?: string): Promise<void> { return unsupported(); }
-  async getApiKeys(userId: string): Promise<S.ApiKey[]> { this.authorize(userId); return unsupported(); }
-  async getApiKeyByHash(_hash: string): Promise<S.ApiKey | undefined> { return unsupported(); }
-  async createApiKey(_data: S.InsertApiKey): Promise<S.ApiKey> { return unsupported(); }
-  async deleteApiKey(_id: number,_userId: string): Promise<void> { return unsupported(); }
-  async updateApiKeyLastUsed(_id: number): Promise<void> { return unsupported(); }
+  private custodyBinding() { if (!this.custodyScope) throw new Error('Secure credential custody binding unavailable'); return this.custodyScope; }
+  private keyView(record: AppRecord): S.ApiKey {
+    // IStorage compatibility: no verifier or prefix is returned, even to internal callers.
+    return {...decode<S.ApiKey>(record)!,keyHash:'',keyPrefix:''};
+  }
+  async getApiKeys(userId: string): Promise<S.ApiKey[]> {
+    this.authorize(userId); if(userId!==this.principal) throw new Error('Credential owner denied');
+    return Object.values((await this.state()).records.apiKeys).filter(r=>r.userId===userId).map(r=>this.keyView(r));
+  }
+  async getApiKeyByHash(hash: string): Promise<S.ApiKey | undefined> {
+    const scope=this.custodyBinding(), state=await this.state();
+    const matches=[];
+    for(const row of Object.values(state.records.apiKeys)) if(await this.custody.matches(scope,String(row.credentialRef),hash)) matches.push(row);
+    if(matches.length>1) throw new Error('Duplicate credential lookup');
+    const row=matches[0];
+    if(!row || row.userId!==this.principal || !row.isActive || (row.expiresAt && Date.parse(String(row.expiresAt))<=Date.now())) return undefined;
+    return this.keyView(row);
+  }
+  createApiKey(data: S.InsertApiKey): Promise<S.ApiKey> { return this.createApiKeyIdempotent(data,randomUUID()); }
+  async createApiKeyIdempotent(data: S.InsertApiKey,key: string, rotateId?: number): Promise<S.ApiKey> {
+    const scope=this.custodyBinding(); this.authorize(data.userId);
+    if(data.userId!==this.principal) throw new Error('Credential owner denied');
+    // Stage is durable and inert. Never hash verifier-bearing input into a Git audit fingerprint.
+    const ref=await this.custody.stage(scope,this.principal+':'+key,{kind:'api-key',verifier:data.keyHash,prefix:data.keyPrefix});
+    const safe=encode({userId:data.userId,name:data.name,permissions:data.permissions ?? ['attest:read','attest:write'],isActive:data.isActive ?? true,expiresAt:data.expiresAt ?? null,credentialRef:ref});
+    const result=await this.mutate<AppRecord>('credential-authorize',{safe,rotateId:rotateId ?? null},state=> {
+      const old=rotateId===undefined ? undefined : state.records.apiKeys[rotateId];
+      if(rotateId!==undefined && (!old || old.userId!==this.principal || !old.isActive)) throw new Error('Rotation owner/state denied');
+      const sub=Object.values(state.records.subscriptions).find(s=>s.userId===this.principal);
+      const count=Object.values(state.records.apiKeys).filter(r=>r.userId===this.principal && r.isActive && (!r.expiresAt || Date.parse(String(r.expiresAt))>Date.now())).length-(old ? 1:0);
+      if(!sub || !['active','trialing'].includes(String(sub.status)) || (Number(sub.apiKeyLimit)!==-1 && count>=Number(sub.apiKeyLimit))) throw new Error('API key quota denied');
+      if(Object.values(state.records.apiKeys).some(r=>r.credentialRef===ref)) throw new Error('Credential already authorized');
+      const record=encode({...safe,id:this.next(state,'apiKeys'),createdAt:new Date(),lastUsedAt:null});
+      return {operations:[this.put(state,'apiKeys',record),...(old ? [this.put(state,'apiKeys',{...old,isActive:false})]:[])],result:record};
+    },key);
+    // Do not delete staged material on ambiguous append failure: Git may already have accepted it.
+    // Rotation disables the old Git authorization atomically; custody deletion can be retried separately.
+    return this.keyView(result);
+  }
+  async deleteApiKey(id: number,userId: string): Promise<void> {
+    this.authorize(userId); if(userId!==this.principal) throw new Error('Credential owner denied');
+    const scope=this.custodyBinding();
+    await this.mutate<void>('credential-revoke',{id,userId},state=> {
+      const row=state.records.apiKeys[id]; if(!row || row.userId!==userId) throw new Error('Credential owner denied');
+      return {operations:[this.put(state,'apiKeys',{...row,isActive:false})],result:undefined};
+    });
+    const row=(await this.state()).records.apiKeys[id];
+    await this.custody.destroy(scope,String(row.credentialRef));
+  }
+  async updateApiKeyLastUsed(id: number): Promise<void> {
+    await this.mutate<void>('credential-use',{id},state=> {
+      const row=state.records.apiKeys[id];
+      if(!row || row.userId!==this.principal || !row.isActive || (row.expiresAt && Date.parse(String(row.expiresAt))<=Date.now())) throw new Error('Credential use denied');
+      return {operations:[this.put(state,'apiKeys',{...row,lastUsedAt:new Date().toISOString()})],result:undefined};
+    });
+  }
+  async authenticateApiKey(hash: string,permission: 'attest:read' | 'attest:write',requestId: string) {
+    const key=await this.getApiKeyByHash(hash);
+    if(!key || !key.permissions?.includes(permission)) throw new Error('Credential authorization denied');
+    await this.mutate<void>('credential-authenticate',{id:key.id,permission},state=> {
+      const row=state.records.apiKeys[key.id];
+      if(!row || row.userId!==this.principal || !row.isActive || !Array.isArray(row.permissions) || !row.permissions.includes(permission) || (row.expiresAt && Date.parse(String(row.expiresAt))<=Date.now())) throw new Error('Credential authorization denied');
+      return {operations:[this.put(state,'apiKeys',{...row,lastUsedAt:new Date().toISOString()})],result:undefined};
+    },requestId);
+    // Recheck after the append, including retries of old requests after revocation.
+    const accepted=await this.getApiKeyByHash(hash);
+    if(!accepted) throw new Error('Credential authorization denied');
+    return accepted;
+  }
+  async stageOidcSession(material: string,expiresAt: Date,requestId: string) {
+    const scope=this.custodyBinding();
+    if(!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime()<=Date.now()) throw new Error('Session expiry denied');
+    const ref=await this.custody.stage(scope,this.principal+':session:'+requestId,{kind:'oidc-session',material});
+    const id=digest([this.principal,'session',requestId]);
+    await this.mutate('session-authorize',{id,ref,expiresAt},state=> {
+      if(state.versions['sessions/'+id]) throw new Error('Session request already used');
+      const record=encode({id,userId:this.principal,custodianRef:ref,expiresAt});
+      return {operations:[this.put(state,'sessions',record)],result:record};
+    },requestId);
+    return id;
+  }
+  async recoverOidcSession(id: string) {
+    const row=(await this.state()).records.sessions[id];
+    if(!row || row.userId!==this.principal || Date.parse(String(row.expiresAt))<=Date.now()) throw new Error('Session authorization denied');
+    const material=await this.custody.recoverSession(this.custodyBinding(),String(row.custodianRef));
+    const current=(await this.state()).records.sessions[id];
+    if(!current || current.userId!==this.principal || current.custodianRef!==row.custodianRef || Date.parse(String(current.expiresAt))<=Date.now()) throw new Error('Session authorization denied');
+    return material;
+  }
+  async revokeOidcSession(id: string) {
+    const scope=this.custodyBinding();
+    const row=(await this.state()).records.sessions[id];
+    if(!row || row.userId!==this.principal) throw new Error('Session authorization denied');
+    await this.mutate<void>('session-revoke',{id},state=> {
+      const current=state.records.sessions[id];
+      if(!current || current.userId!==this.principal) throw new Error('Session authorization denied');
+      return {operations:[this.put(state,'sessions',{...current,expiresAt:new Date(0).toISOString()})],result:undefined};
+    });
+    await this.custody.destroy(scope,String(row.custodianRef));
+  }
   async getOrganizations(userId: string) { this.authorize(userId); const memberships=await this.rows<S.OrgMember>('orgMembers'); return (await this.rows<S.Organization>('organizations')).filter(o=>o.ownerId===userId || memberships.some(m=>m.orgId===o.id&&m.userId===userId)); }
   getOrganization(id: number) { return this.row<S.Organization>('organizations',id); }
   async getOrganizationBySlug(slug: string) { return (await this.rows<S.Organization>('organizations')).find(o=>o.slug===slug); }
@@ -198,6 +294,26 @@ export class GitStorage implements IStorage {
       }
       return {operations:[this.put(state,'subscriptions',encode({...old,...data,id,attestationCount:count}))],result:undefined};
     },eventId);
+  }
+  /** Internal boundary for StripeInbox only. No untrusted HTTP body may call this directly. */
+  async acceptStripeInvoice(event: {id: string; created: number; customer: string; subscription: string; start: number; end: number; plan: string; limit: number; keyLimit: number}) {
+    return this.mutate<void>('stripe-inbox',event,state=> {
+      const existing=Object.values(state.records.auditLogs).find(r=>r.resourceType==='stripe-event' && r.resourceId===event.id);
+      if(existing) {
+        if(existing.action!==digest(event)) throw new Error('Provider event ID conflict');
+        return {operations:[],result:undefined};
+      }
+      const sub=Object.values(state.records.subscriptions).find(s=>s.stripeCustomerId===event.customer && s.stripeSubscriptionId===event.subscription);
+      if(!sub) throw new Error('Unknown provider customer/subscription');
+      if(sub.billingEventCreated!=null && event.created<=Number(sub.billingEventCreated)) throw new Error('Stale or unordered provider event');
+      const before=Date.parse(String(sub.currentPeriodStart));
+      const previousEnd=Date.parse(String(sub.currentPeriodEnd));
+      const start=event.start*1000, end=event.end*1000;
+      if(!Number.isFinite(before) || !Number.isFinite(previousEnd) || start<before || end<=start || end<previousEnd || (start===before && end!==previousEnd) || (start>before && start<previousEnd)) throw new Error('Unsafe billing period');
+      const record=encode({...sub,plan:event.plan,status:'active',attestationLimit:event.limit,apiKeyLimit:event.keyLimit,currentPeriodStart:new Date(start),currentPeriodEnd:new Date(end),attestationCount:start>before ? 0:sub.attestationCount,billingEventCreated:event.created,billingEventId:event.id});
+      const audit=encode({id:this.next(state,'auditLogs'),userId:this.principal,action:digest(event),resourceType:'stripe-event',resourceId:event.id,createdAt:new Date()});
+      return {operations:[this.put(state,'subscriptions',record),this.put(state,'auditLogs',audit)],result:undefined};
+    },event.id);
   }
   async incrementAttestationCount(_id: string): Promise<void> { throw new Error('Use atomic createAttestationAndCount to prevent duplicate quota charges'); }
   async resetAttestationCount(_id: number): Promise<void> { throw new Error('Usage reset requires reviewed billing-period reconciliation'); }

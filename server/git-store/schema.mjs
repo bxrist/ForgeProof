@@ -32,13 +32,13 @@ const fields = {
   organizations: `id name slug ownerId description ${common}`,
   orgMembers: `id orgId userId role ${common}`,
   apiKeys: `id userId name permissions isActive lastUsedAt expiresAt credentialRef ${common}`,
-  subscriptions: `id userId orgId stripeCustomerId stripeSubscriptionId plan status currentPeriodStart currentPeriodEnd attestationLimit attestationCount apiKeyLimit ${common}`,
+  subscriptions: `id userId orgId stripeCustomerId stripeSubscriptionId plan status currentPeriodStart currentPeriodEnd attestationLimit attestationCount apiKeyLimit billingEventCreated billingEventId ${common}`,
   auditLogs: `id userId action resourceType resourceId detailsRef ipAddress ${common}`,
   sessions: `id userId expiresAt custodianRef ${common}`,
   receipts: 'id original',
 };
 export const classes = Object.freeze(Object.keys(fields));
-const numbers = new Set('orgId githubId repositoryId attestationLimit attestationCount apiKeyLimit'.split(' '));
+const numbers = new Set('orgId githubId repositoryId attestationLimit attestationCount apiKeyLimit billingEventCreated'.split(' '));
 export function validateRecord(kind, record) {
   if (!classes.includes(kind)) throw new Error('Unknown record class');
   exact(record, fields[kind].split(' '));
