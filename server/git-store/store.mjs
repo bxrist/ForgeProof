@@ -56,6 +56,13 @@ export class GitAppStateService {
     this.checkpoint = structuredClone(checkpoint);
   }
   async head() {
+    // Apple Git can omit dangling symbolic refs from for-each-ref entirely.
+    // Reject both dangling and live symbolic refs before considering a ref absent.
+    const symbolicTarget = await this.git(['symbolic-ref', '-q', this.ref]).catch(error => {
+      if (error?.message === 'git symbolic-ref failed: ') return null;
+      throw new IntegrityError('Unable to verify direct Git stream ref');
+    });
+    if (symbolicTarget !== null) throw new IntegrityError('Symbolic or dangling symref forbidden');
     const refs = await this.git(['for-each-ref', '--format=%(refname) %(objectname) %(symref)', this.ref]);
     const line = refs.split('\n').find(v => v.startsWith(this.ref + ' '));
     if (!line) return null;
@@ -140,6 +147,16 @@ export class GitAppStateService {
           if (existing) throw new Error('Receipts are immutable');
           const r = receiptSignedCore(op.record);
           if (!this.trust.receiptKeys?.includes(r.publicKey)) throw new IntegrityError('Untrusted historical receipt key');
+          // Replit's original API requires the same owner for child attestations.
+          // Enforce this invariant on signed events and keyless replay as well.
+          if (r.parentAttestationId != null) {
+            if (!Number.isSafeInteger(r.parentAttestationId) || r.parentAttestationId < 1)
+              throw new IntegrityError('Invalid historical parent ID');
+            const parentRecord = state.records.receipts[r.parentAttestationId];
+            if (!parentRecord) throw new IntegrityError('Missing historical parent receipt');
+            const parent = receiptSignedCore(parentRecord);
+            if (parent.userId !== r.userId) throw new IntegrityError('Historical parent owner mismatch');
+          }
           if (r.prevEntryHash !== state.receiptHead) throw new IntegrityError('Historical receipt predecessor mismatch');
           if (Object.values(state.records.receipts).some(v => receiptSignedCore(v).entryHash === r.entryHash)) throw new Error('Duplicate receipt hash');
           state.receiptHead = r.entryHash;

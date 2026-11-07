@@ -338,7 +338,27 @@ test('symbolic refs cannot redirect a writer into another tenant stream', async 
   await service.git(['symbolic-ref',service.ref,'refs/heads/uncreated-target']);
   await assert.rejects(service.append(tx('safe-bootstrap',put(3))), /dangling symref/);
   assert.equal(await service.git(['for-each-ref','--format=%(refname)','refs/heads/uncreated-target']), '');
-  assert.equal((await service.replay()).events.length,0);
+  // A dangling symbolic reference is untrusted history, not empty verified history.
+  await assert.rejects(service.replay(),/dangling symref/);
+});
+
+test('signed historical receipt ancestry rejects missing and cross-owner parents', async t => {
+  const {service}=await fixture(t);
+  const origin=receipt(1);
+  await service.append(tx('origin-owner',receiptOp(origin)));
+  const child=receipt(2,origin.entryHash);
+  child.parentAttestationId=1;
+  child.userId='other-owner'; // Original Ed25519 never signed owner fields.
+  await assert.rejects(service.append(tx('cross-owner',receiptOp(child))), /Historical parent owner mismatch/);
+  assert.equal((await service.replay()).events.length,1);
+  child.userId='user-a';
+  child.parentAttestationId=99;
+  await assert.rejects(service.append(tx('missing-parent',receiptOp(child))), /Missing historical parent/);
+  assert.equal((await service.replay()).events.length,1);
+  child.parentAttestationId=1;
+  const accepted=await service.append(tx('same-owner',receiptOp(child)));
+  assert.equal(accepted.checkpoint.sequence,2);
+  assert.equal((await service.replay()).receiptHead,child.entryHash);
 });
 
 test('signature encoding is canonical and ambiguous legacy pipe-delimited fields are rejected', async t => {
