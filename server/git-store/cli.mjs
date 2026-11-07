@@ -4,21 +4,23 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { GitAppStateService } from './store.mjs';
+import { reviewedSnapshotTransactions } from './snapshot.mjs';
 import { canonical, exact, identifier } from './schema.mjs';
 
 export async function main(args) {
   const [command, directory, configPath, outputPath, inputPath, signerModule] = args;
-  if (!['verify','restore','migrate'].includes(command) || !directory || !configPath || !outputPath) throw new Error('Usage: node server/git-store/cli.mjs verify|restore STORE CONFIG OUTPUT; migrate STORE CONFIG CHECKPOINT INPUT SIGNER_MODULE');
+  if (!['verify','restore','migrate','migrate-reviewed'].includes(command) || !directory || !configPath || !outputPath) throw new Error('Usage: node server/git-store/cli.mjs verify|restore STORE CONFIG OUTPUT; migrate STORE CONFIG CHECKPOINT INPUT SIGNER_MODULE');
   const config = JSON.parse(await readFile(configPath, 'utf8'));
   exact(config, ['tenant','repository','trust','checkpoint']);
   let signer;
-  if (command === 'migrate') {
+  if (['migrate','migrate-reviewed'].includes(command)) {
     if (!inputPath || !signerModule) throw new Error('Migration requires fixture/export and external signer module');
     signer = (await import(pathToFileURL(resolve(signerModule)).href)).signer;
   }
   const service = new GitAppStateService({ ...config, directory: resolve(directory), signer });
-  if (command === 'migrate') {
-    const migration = JSON.parse(await readFile(inputPath, 'utf8'));
+  if (['migrate','migrate-reviewed'].includes(command)) {
+    const input = JSON.parse(await readFile(inputPath, 'utf8'));
+    const migration = command === 'migrate-reviewed' ? reviewedSnapshotTransactions(input) : input;
     exact(migration, ['version','transactions']);
     if (migration.version !== 1 || !Array.isArray(migration.transactions)) throw new Error('Unsupported migration format');
     // Preflight the entire export, so invalid later records cannot partially import.
