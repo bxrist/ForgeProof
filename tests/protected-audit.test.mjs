@@ -112,10 +112,12 @@ test('changed nonsecret core field fails on restore', () => {
   assert.throws(() => restoreProtectedAuditLog(mutated, 'tenant-a', 'repo-a', key), /Decryption failed|Inconsistent audit core/);
 });
 
-test('metadata must be non-null in original input', () => {
+test('null historical metadata is sealed and restored without losing original bytes', () => {
   const key = randomBytes(32);
   const row = baseRecord();
   row.metadata = null;
-  const original = Buffer.from(JSON.stringify(row), 'utf8');
-  assert.throws(() => protectLegacyAuditLog(original, 'tenant-a', 'repo-a', key), /metadata must be non-null/);
+  const original = Buffer.from(' \n'+JSON.stringify(row,null,2)+'\n', 'utf8');
+  const protectedRow = protectLegacyAuditLog(original, 'tenant-a', 'repo-a', key);
+  assert.equal(JSON.parse(protectedRow.auditCore).metadata,null);
+  assert.deepEqual(restoreProtectedAuditLog(protectedRow,'tenant-a','repo-a',key),original);
 });

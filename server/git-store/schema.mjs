@@ -83,7 +83,7 @@ export function validateRecord(kind, record) {
   if (kind === 'orgMembers' && !['owner','admin','member'].includes(record.role)) throw new Error('Invalid role');
   if (kind === 'receipts') return validateReceipt(record);
 }
-const receiptFields = 'id userId orgId repositoryId fileHash fileName filePath modelName modelProvider countryOfOrigin detectedCountry complianceStatus attestationType parentAttestationId auditVerdict auditDetails signature publicKey prevEntryHash entryHash receiptVersion signedAt gitCommitUrl gitCommitMessage metadata createdAt'.split(' ');
+export const receiptFields = 'id userId orgId repositoryId fileHash fileName filePath modelName modelProvider countryOfOrigin detectedCountry complianceStatus attestationType parentAttestationId auditVerdict auditDetails signature publicKey prevEntryHash entryHash receiptVersion signedAt gitCommitUrl gitCommitMessage metadata createdAt'.split(' ');
 export function validateReceipt(record) {
   // The original text is retained byte-for-byte, never reserialized or re-signed.
   const r = JSON.parse(record.original);

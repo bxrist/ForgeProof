@@ -75,7 +75,7 @@ function parseOriginalAuditBytes(originalBytes) {
   for (const field of OPTIONAL_STRING_FIELDS) {
     ensureOptionalStringOrNull(parsed[field], field);
   }
-  if (parsed.metadata === null || parsed.metadata === undefined) throw new Error('metadata must be non-null');
+  // Encrypt the exact source row even when its metadata column is null.
 
   const auditCoreObject = { ...parsed, metadata: null };
   validateAuditCoreObject(auditCoreObject);
@@ -186,7 +186,6 @@ export function restoreProtectedAuditLog(protectedRecord, tenant, repository, ke
 
   const parsed = parseUtf8JsonObject(plaintext, 'plaintext');
   exactKeys(parsed, AUDIT_FIELDS, 'plaintext audit row');
-  if (parsed.metadata === null || parsed.metadata === undefined) throw new Error('Missing plaintext metadata');
 
   const expectedCore = JSON.stringify({ ...parsed, metadata: null });
   if (expectedCore !== protectedRecord.auditCore) throw new Error('Inconsistent audit core');
