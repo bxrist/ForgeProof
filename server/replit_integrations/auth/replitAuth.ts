@@ -65,9 +65,9 @@ async function upsertUser(claims: any) {
 export async function setupAuth(app: Express) {
   app.set("trust proxy", 1);
   app.use(getSession());
+  app.use(sessionCsrfProtection);
   app.use(passport.initialize());
   app.use(passport.session());
-  app.use(sessionCsrfProtection);
   const authLimiter = createUiLimiter();
   app.get("/api/csrf-token", authLimiter, issueCsrfToken);
 

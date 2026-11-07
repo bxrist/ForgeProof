@@ -1,11 +1,7 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { csrfSync } from "csrf-sync";
 import { isIP } from "node:net";
 import type { Request, RequestHandler } from "express";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
-
-declare module "express-session" {
-  interface SessionData { csrfToken?: string }
-}
 
 // UI anonymous ingress only: trust forwarded addresses from explicit proxy IPs.
 // Without configuration, anonymous UI traffic shares the transport quota (1200/15min).
@@ -42,25 +38,32 @@ export function createUiLimiter(limit = 1200, windowMs = 15 * 60 * 1000) {
   });
 }
 
+// Stateful synchronizer tokens: only a header can supply the browser token.
+const { generateToken, csrfSynchronisedProtection } = csrfSync({
+  size: 32,
+  getTokenFromRequest: (req) => req.get("x-csrf-token"),
+});
+
 export const issueCsrfToken: RequestHandler = (req, res) => {
-  req.session.csrfToken ??= randomBytes(32).toString("hex");
   res.set("Cache-Control", "no-store");
-  res.json({ csrfToken: req.session.csrfToken });
+  res.json({ csrfToken: generateToken(req) });
 };
 
 export const requireSessionCsrf: RequestHandler = (req, res, next) => {
+  const reject = () => res.status(403).json({
+    code: "CSRF_INVALID", message: "Your security token expired. Please try again.",
+  });
   const origin = req.get("origin");
   const expectedOrigin = `${req.protocol}://${req.get("host")}`;
-  const token = req.get("x-csrf-token");
-  const expected = req.session?.csrfToken;
   if (req.get("sec-fetch-site") === "cross-site" ||
-      (origin !== undefined && origin !== expectedOrigin) ||
-      !expected || !token || !/^[a-f0-9]{64}$/.test(token) ||
-      !timingSafeEqual(Buffer.from(token), Buffer.from(expected))) {
-    res.status(403).json({ code: "CSRF_INVALID", message: "Your security token expired. Please try again." });
+      (origin !== undefined && origin !== expectedOrigin)) {
+    reject();
     return;
   }
-  next();
+  csrfSynchronisedProtection(req, res, (error) => {
+    if (error) { reject(); return; }
+    next();
+  });
 };
 
 export const sessionCsrfProtection: RequestHandler = (req, res, next) => {
@@ -70,6 +73,7 @@ export const sessionCsrfProtection: RequestHandler = (req, res, next) => {
   const path = req.path.toLowerCase().replace(/\/+$/, "");
   if (["/api/github/webhook", "/api/stripe/webhook", "/api/mcp/tools", "/api/v1/attest",
     "/api/v1/agents/openai", "/api/v1/agents/claude", "/api/v1/agents/replit"].includes(path)) return next();
-  if (!req.isAuthenticated?.()) return next();
+  // No authentication or token refresh here. Reject unsafe UI requests even
+  // before login; authorization and its limiters remain on the UI routes.
   requireSessionCsrf(req, res, next);
 };

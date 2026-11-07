@@ -3,24 +3,37 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import session from 'express-session';
 import { createHmac } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { createServer, request as httpsRequest } from 'node:https';
 import { runInNewContext } from 'node:vm';
 import rateLimit from 'express-rate-limit';
+import ts from 'typescript';
 import { createTransportRateLimitKey, createUiLimiter, issueCsrfToken, requireSessionCsrf, sessionCsrfProtection, transportRateLimitKey } from '../server/httpSecurity.ts';
 import { verifyGitHubWebhookSignature } from '../server/security.ts';
 
 async function fixture(t, limit = 100) {
+  const tlsDir = mkdtempSync(join(tmpdir(), 'forgeproof-test-tls-'));
+  t.after(() => rmSync(tlsDir, { recursive: true, force: true }));
+  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+    '-keyout', join(tlsDir, 'key.pem'), '-out', join(tlsDir, 'cert.pem'),
+    '-days', '1', '-subj', '/CN=127.0.0.1', '-addext', 'subjectAltName=IP:127.0.0.1'], { stdio: 'ignore' });
+  const cert = readFileSync(join(tlsDir, 'cert.pem'));
+  const key = readFileSync(join(tlsDir, 'key.pem'));
   const app = express();
   app.set('trust proxy', 1); // existing production setting; UI uses separate safe keys
   app.use(express.json({ verify: (req, _res, body) => { req.rawBody = body; } }));
-  app.use(session({ secret: 'local-test-session-secret', resave: false, saveUninitialized: false }));
+  app.use(rateLimit({ windowMs: 60_000, limit: 1000 }));
+  app.use(session({ secret: 'local-test-session-secret', resave: false, saveUninitialized: false, cookie: { secure: true, httpOnly: true, sameSite: 'lax' } }));
+  app.use(sessionCsrfProtection);
   app.use((req, _res, next) => {
     req.isAuthenticated = () => !!req.session.loggedIn;
     if (req.isAuthenticated()) req.user = { claims: { sub: 'test-user' } };
     next();
   });
-  app.use(sessionCsrfProtection);
-  app.get('/api/csrf-token', issueCsrfToken);
+  app.get('/api/csrf-token', createUiLimiter(), issueCsrfToken);
   app.get('/login', (req, res) => { req.session.loggedIn = true; res.sendStatus(200); });
   const uiLimiter = createUiLimiter(limit);
   app.post('/api/preferences', uiLimiter, (_req, res) => res.sendStatus(204));
@@ -33,14 +46,32 @@ async function fixture(t, limit = 100) {
   app.post('/api/github/webhook', (req, res) => res.sendStatus(
     verifyGitHubWebhookSignature(req.rawBody, req.get('x-hub-signature-256'), 'local-webhook-test-secret') ? 204 : 401));
   app.get('/limited', createUiLimiter(limit), (req, res) => res.json({ key: transportRateLimitKey(req) }));
-  const server = app.listen(0, '127.0.0.1');
+  const server = createServer({ key, cert }, app).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
-  const base = `http://127.0.0.1:${server.address().port}`;
+  const base = `https://127.0.0.1:${server.address().port}`;
   let cookie;
   const request = async (path, options = {}) => {
-    const response = await fetch(base + path, { ...options, headers: { ...(cookie ? { cookie } : {}), ...options.headers } });
-    if (response.headers.get('set-cookie')) cookie = response.headers.get('set-cookie').split(';')[0];
+    const response = await new Promise((resolve, reject) => {
+      const req = httpsRequest(base + path, { ca: cert, method: options.method || 'GET',
+        headers: { ...(cookie ? { cookie } : {}), ...options.headers } }, res => {
+        const chunks = [];
+        res.on('data', chunk => chunks.push(chunk));
+        res.on('end', () => resolve(new Response(res.statusCode === 204 ? null : Buffer.concat(chunks), {
+          status: res.statusCode, headers: Object.entries(res.headers).flatMap(([name, values]) =>
+            (Array.isArray(values) ? values : [values]).map(value => [name, value])),
+        })));
+      });
+      req.on('error', reject);
+      req.end(options.body);
+    });
+    if (response.headers.get('set-cookie')) {
+      const issuedCookie = response.headers.get('set-cookie');
+      assert.match(issuedCookie, /; Secure/i);
+      assert.match(issuedCookie, /; HttpOnly/i);
+      assert.match(issuedCookie, /; SameSite=Lax/i);
+      cookie = issuedCookie.split(';')[0];
+    }
     return response;
   };
   await request('/login');
@@ -54,6 +85,10 @@ test('session token issuance, reuse, valid mutation and rejected missing/invalid
   const { csrfToken } = await issued.json();
   assert.match(csrfToken, /^[a-f0-9]{64}$/);
   assert.equal((await (await request('/api/csrf-token')).json()).csrfToken, csrfToken);
+  assert.equal((await request(`/api/preferences?csrfToken=${csrfToken}`, { method: 'POST' })).status, 403);
+  assert.equal((await request('/api/preferences', { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ csrfToken }),
+  })).status, 403);
   for (const path of ['/api/preferences', '/api/v1/attest']) {
     for (const token of [undefined, 'bad', '0'.repeat(64)]) {
       const res = await request(path, { method: 'POST', headers: token ? { 'x-csrf-token': token } : {} });
@@ -140,4 +175,58 @@ test('existing API limiters preserve default Express IP keying and original quot
     assert.ok(blocked.headers.get('retry-after'));
     assert.equal((await fetch(`${base}/${name}`, { headers: { 'x-forwarded-for': '192.0.2.2' } })).status, 204);
   }
+});
+
+
+test('CSRF dispatch preserves safe OIDC methods and independent protocols without doing authorization', () => {
+  const response = { status(code) { this.code = code; return this; }, json() {} };
+  const request = (method, path) => ({ method, path, protocol: 'https',
+    session: {}, get: () => undefined,
+    isAuthenticated() { throw new Error('CSRF dispatch must not perform authorization'); } });
+  for (const method of ['GET', 'HEAD', 'OPTIONS']) {
+    for (const path of ['/api/login', '/api/callback', '/api/logout', '/api/github/callback']) {
+      let continued = false;
+      sessionCsrfProtection(request(method, path), response, () => { continued = true; });
+      assert.equal(continued, true);
+    }
+  }
+  for (const path of ['/api/stripe/webhook', '/api/github/webhook', '/api/mcp/tools',
+    '/api/v1/attest', '/api/v1/agents/openai', '/api/v1/agents/claude', '/api/v1/agents/replit']) {
+    let continued = false;
+    sessionCsrfProtection(request('POST', path), response, () => { continued = true; });
+    assert.equal(continued, true);
+  }
+  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+    let continued = false;
+    sessionCsrfProtection(request(method, '/api/preferences'), response, () => { continued = true; });
+    assert.equal(continued, false);
+    assert.equal(response.code, 403);
+  }
+});
+
+test('browser apiRequest obtains a session token before mutation and fails closed on token fetch failure', async t => {
+  const { request } = await fixture(t);
+  const source = readFileSync(new URL('../client/src/lib/queryClient.ts', import.meta.url), 'utf8');
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
+  const exported = {};
+  const calls = [];
+  let failToken = false;
+  runInNewContext(compiled, { exports: exported,
+    require: () => ({ QueryClient: class {} }),
+    fetch: async (path, options) => {
+      calls.push({ path, options });
+      if (failToken && path === '/api/csrf-token') return new Response('Unavailable', { status: 503 });
+      return request(path, options);
+    },
+  });
+  assert.equal((await exported.apiRequest('POST', '/api/preferences', { theme: 'dark' })).status, 204);
+  assert.equal(calls[0].path, '/api/csrf-token');
+  assert.equal(calls[0].options.cache, 'no-store');
+  assert.equal(calls[0].options.credentials, 'include');
+  assert.match(calls[1].options.headers['X-CSRF-Token'], /^[a-f0-9]{64}$/);
+  assert.equal(calls[1].options.credentials, 'include');
+  failToken = true;
+  calls.length = 0;
+  await assert.rejects(exported.apiRequest('PATCH', '/api/preferences', {}), /503/);
+  assert.equal(calls.length, 1);
 });
