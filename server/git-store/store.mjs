@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import { canonical, hash, exact, identifier, positive, signatureValid, validateRecord, validateReceipt, classes } from './schema.mjs';
+import { verifyProtectedReceiptCore } from './protected-receipt.mjs';
+const receiptSignedCore = record => Object.prototype.hasOwnProperty.call(record, 'originalCore') ? verifyProtectedReceiptCore(record) : validateReceipt(record);
 const ZERO = '0'.repeat(40);
 export const MAX_EVENT_BYTES = 8 * 1024 * 1024;
 export class ConflictError extends Error {}
@@ -134,10 +136,10 @@ export class GitAppStateService {
         if (op.record.id !== op.id) throw new Error('Record ID mismatch');
         if (op.kind === 'receipts') {
           if (existing) throw new Error('Receipts are immutable');
-          const r = validateReceipt(op.record);
+          const r = receiptSignedCore(op.record);
           if (!this.trust.receiptKeys?.includes(r.publicKey)) throw new IntegrityError('Untrusted historical receipt key');
           if (r.prevEntryHash !== state.receiptHead) throw new IntegrityError('Historical receipt predecessor mismatch');
-          if (Object.values(state.records.receipts).some(v => validateReceipt(v).entryHash === r.entryHash)) throw new Error('Duplicate receipt hash');
+          if (Object.values(state.records.receipts).some(v => receiptSignedCore(v).entryHash === r.entryHash)) throw new Error('Duplicate receipt hash');
           state.receiptHead = r.entryHash;
         }
         state.records[op.kind][op.id] = structuredClone(op.record);

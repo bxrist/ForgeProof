@@ -41,6 +41,14 @@ export const classes = Object.freeze(Object.keys(fields));
 const numbers = new Set('orgId githubId repositoryId attestationLimit attestationCount apiKeyLimit billingEventCreated'.split(' '));
 export function validateRecord(kind, record) {
   if (!classes.includes(kind)) throw new Error('Unknown record class');
+  // Protected historical receipts retain a verified redacted signed core and
+  // encrypted exact original bytes. The complete encryption envelope is
+  // verified again in GitAppStateService.apply on both append and replay.
+  if (kind === 'receipts' && Object.prototype.hasOwnProperty.call(record, 'originalCore')) {
+    exact(record, ['id', 'originalCore', 'encryption']);
+    positive(record.id);
+    return validateReceipt({id: record.id, original: record.originalCore});
+  }
   exact(record, fields[kind].split(' '));
   if (kind === 'users' || kind === 'sessions') identifier(record.id); else positive(record.id);
   for (const [key, value] of Object.entries(record)) {
