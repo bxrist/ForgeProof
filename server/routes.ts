@@ -1,18 +1,22 @@
 import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
 import rateLimit from "express-rate-limit";
+import { createUiLimiter, requireSessionCsrf } from "./httpSecurity";
+
 import { storage } from "./storage";
 import { pool } from "./db";
 import { setupAuth, isAuthenticated } from "./replit_integrations/auth/replitAuth";
 import { sha256, signData, getKeyPair, computeEntryHash, generateApiKey, verifySignature, getReceiptSigningTimestamp } from "./crypto";
 import { fetchUserRepos, fetchRepoFiles, fetchFileContent, fetchRepoCommits, fetchCommitFiles, commitAttestationToGit } from "./github";
-import { z } from "zod";
+import { attestRequestSchema, agentAttestSchema, requestValidationIssues } from "./requestValidation";
 import { getMcpManifest, handleMcpTool } from "./mcp";
 import { sendGitCommitFailureEmail } from "./email";
 import { attestationReceipts } from "@shared/schema";
 import { desc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { hasApiKeyPermission, verifyGitHubWebhookSignature, mcpToolPermission, type ApiKeyPermission } from "./security";
+
+const uiLimiter = createUiLimiter();
 
 const publicApiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -44,35 +48,6 @@ const demoLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Too many requests to demo endpoints." },
-});
-
-const attestRequestSchema = z.object({
-  file_path: z.string(),
-  file_hash: z.string(),
-  model_name: z.string(),
-  model_provider: z.string(),
-  country_of_origin: z.string(),
-  repository: z.string().optional(),
-  file_name: z.string().optional(),
-  metadata: z.record(z.any()).optional(),
-  attestation_type: z.enum(["origin", "security_audit", "refactor", "review"]).optional().default("origin"),
-  parent_attestation_id: z.number().optional(),
-  audit_verdict: z.enum(["secure", "flagged", "remediated", "needs_review"]).optional(),
-  audit_details: z.string().optional(),
-});
-
-const agentAttestSchema = z.object({
-  files: z.array(z.object({
-    file_path: z.string(),
-    file_hash: z.string(),
-    file_name: z.string().optional(),
-  })),
-  model_name: z.string(),
-  model_provider: z.string(),
-  country_of_origin: z.string(),
-  repository: z.string().optional(),
-  session_id: z.string().optional(),
-  metadata: z.record(z.any()).optional(),
 });
 
 function detectCountryFromRequest(req: Request): string | null {
@@ -252,7 +227,7 @@ export async function registerRoutes(
   await setupAuth(app);
 
   // ─── Auth ─────────────────────────────────────────
-  app.get("/api/auth/user", (req, res) => {
+  app.get("/api/auth/user", uiLimiter, (req, res) => {
     if (!req.isAuthenticated() || !req.user) {
       return res.status(401).json({ message: "Not authenticated" });
     }
@@ -271,14 +246,14 @@ export async function registerRoutes(
   });
 
   // ─── Attestations (authenticated) ─────────────────
-  app.get("/api/attestations", isAuthenticated, async (req, res) => {
+  app.get("/api/attestations", uiLimiter, isAuthenticated, async (req, res) => {
     const user = req.user as any;
     const userId = user.claims?.sub || user.id;
     const attestations = await storage.getAttestations(userId);
     res.json(attestations);
   });
 
-  app.get("/api/attestations/:id", isAuthenticated, async (req, res) => {
+  app.get("/api/attestations/:id", uiLimiter, isAuthenticated, async (req, res) => {
     const id = parseInt(req.params.id as string);
     if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
     const user = req.user as any;
@@ -293,7 +268,7 @@ export async function registerRoutes(
   });
 
   // ─── Git Backfill: bulk ────────────────────────────
-  app.post("/api/attestations/backfill-git", isAuthenticated, async (req, res) => {
+  app.post("/api/attestations/backfill-git", uiLimiter, isAuthenticated, async (req, res) => {
     const user = req.user as any;
     const userId = user.claims?.sub || user.id;
 
@@ -377,7 +352,7 @@ export async function registerRoutes(
   });
 
   // ─── Git Backfill: single attestation ─────────────
-  app.post("/api/attestations/:id/git-commit", isAuthenticated, async (req, res) => {
+  app.post("/api/attestations/:id/git-commit", uiLimiter, isAuthenticated, async (req, res) => {
     const id = parseInt(req.params.id as string);
     if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
 
@@ -459,14 +434,14 @@ export async function registerRoutes(
   });
 
   // ─── GitHub Repositories ──────────────────────────
-  app.get("/api/repositories", isAuthenticated, async (req, res) => {
+  app.get("/api/repositories", uiLimiter, isAuthenticated, async (req, res) => {
     const user = req.user as any;
     const userId = user.claims?.sub || user.id;
     const repos = await storage.getRepositories(userId);
     res.json(repos);
   });
 
-  app.post("/api/repositories/sync", isAuthenticated, async (req, res) => {
+  app.post("/api/repositories/sync", uiLimiter, isAuthenticated, async (req, res) => {
     try {
       const user = req.user as any;
       const userId = user.claims?.sub || user.id;
@@ -505,7 +480,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/repositories/:id/files", isAuthenticated, async (req, res) => {
+  app.get("/api/repositories/:id/files", uiLimiter, isAuthenticated, async (req, res) => {
     try {
       const id = parseInt(req.params.id as string);
       if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
@@ -523,7 +498,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/repositories/:id/attest", isAuthenticated, async (req, res) => {
+  app.post("/api/repositories/:id/attest", uiLimiter, isAuthenticated, async (req, res) => {
     try {
       const id = parseInt(req.params.id as string);
       if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
@@ -572,7 +547,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/repositories", isAuthenticated, async (req, res) => {
+  app.post("/api/repositories", uiLimiter, isAuthenticated, async (req, res) => {
     try {
       const user = req.user as any;
       const userId = user.claims?.sub || user.id;
@@ -598,7 +573,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/repositories/:id", isAuthenticated, async (req, res) => {
+  app.delete("/api/repositories/:id", uiLimiter, isAuthenticated, async (req, res) => {
     const id = parseInt(req.params.id as string);
     if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
     const user = req.user as any;
@@ -614,7 +589,7 @@ export async function registerRoutes(
   // ─── GitHub OAuth ──────────────────────────────────
   const oauthStates = new Map<string, number>();
 
-  app.get("/api/github/connect", isAuthenticated, (req, res) => {
+  app.get("/api/github/connect", uiLimiter, isAuthenticated, (req, res) => {
     const clientId = process.env.GITHUB_CLIENT_ID;
     if (!clientId) {
       return res.status(503).json({ message: "GitHub OAuth is not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET." });
@@ -632,7 +607,7 @@ export async function registerRoutes(
     res.json({ url });
   });
 
-  app.get("/api/github/callback", async (req, res) => {
+  app.get("/api/github/callback", uiLimiter, async (req, res) => {
     const { code, state } = req.query;
     if (!code) return res.redirect("/dashboard?github=error");
 
@@ -674,7 +649,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/github/status", isAuthenticated, async (req, res) => {
+  app.get("/api/github/status", uiLimiter, isAuthenticated, async (req, res) => {
     const configured = !!(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET);
     const user = req.user as any;
     const userId = user?.claims?.sub || user?.id;
@@ -684,7 +659,7 @@ export async function registerRoutes(
     res.json({ configured, connected, githubUsername });
   });
 
-  app.get("/api/github/repos", isAuthenticated, async (req, res) => {
+  app.get("/api/github/repos", uiLimiter, isAuthenticated, async (req, res) => {
     const user = req.user as any;
     const userId = user?.claims?.sub || user?.id;
     const dbUser = userId ? await storage.getUser(userId) : null;
@@ -775,14 +750,14 @@ export async function registerRoutes(
   });
 
   // ─── Billing ──────────────────────────────────────
-  app.get("/api/billing/subscription", isAuthenticated, async (req, res) => {
+  app.get("/api/billing/subscription", uiLimiter, isAuthenticated, async (req, res) => {
     const user = req.user as any;
     const userId = user.claims?.sub || user.id;
     const subscription = await storage.getOrCreateFreeSubscription(userId);
     res.json(subscription);
   });
 
-  app.post("/api/billing/checkout", isAuthenticated, async (req, res) => {
+  app.post("/api/billing/checkout", uiLimiter, isAuthenticated, async (req, res) => {
     try {
       const user = req.user as any;
       const userId = user.claims?.sub || user.id;
@@ -802,7 +777,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/billing/portal", isAuthenticated, async (req, res) => {
+  app.post("/api/billing/portal", uiLimiter, isAuthenticated, async (req, res) => {
     try {
       const user = req.user as any;
       const userId = user.claims?.sub || user.id;
@@ -818,7 +793,7 @@ export async function registerRoutes(
   });
 
   // ─── API Keys ─────────────────────────────────────
-  app.get("/api/api-keys", isAuthenticated, async (req, res) => {
+  app.get("/api/api-keys", uiLimiter, isAuthenticated, async (req, res) => {
     const user = req.user as any;
     const userId = user.claims?.sub || user.id;
     const keys = await storage.getApiKeys(userId);
@@ -826,7 +801,7 @@ export async function registerRoutes(
     res.json(safeKeys);
   });
 
-  app.post("/api/api-keys", isAuthenticated, async (req, res) => {
+  app.post("/api/api-keys", uiLimiter, isAuthenticated, async (req, res) => {
     const { name } = req.body;
     if (!name || typeof name !== "string") {
       return res.status(400).json({ message: "Name is required" });
@@ -855,7 +830,7 @@ export async function registerRoutes(
     res.json({ ...apiKey, fullKey });
   });
 
-  app.delete("/api/api-keys/:id", isAuthenticated, async (req, res) => {
+  app.delete("/api/api-keys/:id", uiLimiter, isAuthenticated, async (req, res) => {
     const id = parseInt(req.params.id as string);
     if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
     const user = req.user as any;
@@ -866,14 +841,14 @@ export async function registerRoutes(
   });
 
   // ─── Organizations ──────────────────────────────────
-  app.get("/api/organizations", isAuthenticated, async (req, res) => {
+  app.get("/api/organizations", uiLimiter, isAuthenticated, async (req, res) => {
     const user = req.user as any;
     const userId = user?.claims?.sub || user?.id;
     const orgs = await storage.getOrganizations(userId);
     res.json(orgs);
   });
 
-  app.post("/api/organizations", isAuthenticated, async (req, res) => {
+  app.post("/api/organizations", uiLimiter, isAuthenticated, async (req, res) => {
     const user = req.user as any;
     const userId = user?.claims?.sub || user?.id;
     const { name, description } = req.body;
@@ -887,7 +862,7 @@ export async function registerRoutes(
     res.json(org);
   });
 
-  app.get("/api/organizations/:id/members", isAuthenticated, async (req, res) => {
+  app.get("/api/organizations/:id/members", uiLimiter, isAuthenticated, async (req, res) => {
     const orgId = parseInt(req.params.id as string);
     const user = req.user as any;
     const userId = user?.claims?.sub || user?.id;
@@ -897,7 +872,7 @@ export async function registerRoutes(
     res.json(members);
   });
 
-  app.post("/api/organizations/:id/members", isAuthenticated, async (req, res) => {
+  app.post("/api/organizations/:id/members", uiLimiter, isAuthenticated, async (req, res) => {
     const orgId = parseInt(req.params.id as string);
     const user = req.user as any;
     const userId = user?.claims?.sub || user?.id;
@@ -914,7 +889,7 @@ export async function registerRoutes(
     res.json(newMember);
   });
 
-  app.delete("/api/organizations/:id", isAuthenticated, async (req, res) => {
+  app.delete("/api/organizations/:id", uiLimiter, isAuthenticated, async (req, res) => {
     const orgId = parseInt(req.params.id as string);
     const user = req.user as any;
     const userId = user?.claims?.sub || user?.id;
@@ -926,7 +901,7 @@ export async function registerRoutes(
   });
 
   // ─── Audit Logs ──────────────────────────────────
-  app.get("/api/audit-logs", isAuthenticated, async (req, res) => {
+  app.get("/api/audit-logs", uiLimiter, isAuthenticated, async (req, res) => {
     const user = req.user as any;
     const userId = user?.claims?.sub || user?.id;
     const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
@@ -935,14 +910,14 @@ export async function registerRoutes(
   });
 
   // ─── Notification Preferences ──────────────────────
-  app.get("/api/notifications/preferences", isAuthenticated, async (req, res) => {
+  app.get("/api/notifications/preferences", uiLimiter, isAuthenticated, async (req, res) => {
     const user = req.user as any;
     const userId = user?.claims?.sub || user?.id;
     const dbUser = await storage.getUser(userId);
     res.json({ notificationEmail: dbUser?.notificationEmail || null });
   });
 
-  app.post("/api/notifications/preferences", isAuthenticated, async (req, res) => {
+  app.post("/api/notifications/preferences", uiLimiter, isAuthenticated, async (req, res) => {
     const user = req.user as any;
     const userId = user?.claims?.sub || user?.id;
     const { notificationEmail } = req.body;
@@ -952,14 +927,14 @@ export async function registerRoutes(
   });
 
   // ─── User Preferences ──────────────────────────────
-  app.get("/api/preferences", isAuthenticated, async (req, res) => {
+  app.get("/api/preferences", uiLimiter, isAuthenticated, async (req, res) => {
     const user = req.user as any;
     const userId = user?.claims?.sub || user?.id;
     const dbUser = await storage.getUser(userId);
     res.json({ defaultRepoId: dbUser?.defaultRepoId || null });
   });
 
-  app.patch("/api/preferences", isAuthenticated, async (req, res) => {
+  app.patch("/api/preferences", uiLimiter, isAuthenticated, async (req, res) => {
     const user = req.user as any;
     const userId = user?.claims?.sub || user?.id;
     const { defaultRepoId } = req.body;
@@ -1006,6 +981,9 @@ export async function registerRoutes(
 
     userId = await authenticateApiKey(req, "attest:write");
     if (!userId && req.isAuthenticated()) {
+      let csrfValid = false;
+      requireSessionCsrf(req, res, () => { csrfValid = true; });
+      if (!csrfValid) return;
       const user = req.user as any;
       userId = user.claims?.sub || user.id;
     }
@@ -1015,7 +993,7 @@ export async function registerRoutes(
 
     const parsed = attestRequestSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+      return res.status(400).json({ message: "Invalid request", errors: requestValidationIssues(parsed.error, req.body) });
     }
 
     const data = parsed.data;
@@ -1145,7 +1123,7 @@ export async function registerRoutes(
   });
 
   // ─── Attestation Chain ──────────────────────────────
-  app.get("/api/v1/attestation/:id/chain", async (req, res) => {
+  app.get("/api/v1/attestation/:id/chain", verifyLimiter, async (req, res) => {
     const id = parseInt(req.params.id as string);
     if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
 
@@ -1189,7 +1167,7 @@ export async function registerRoutes(
 
     const parsed = agentAttestSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+      return res.status(400).json({ message: "Invalid request", errors: requestValidationIssues(parsed.error, req.body) });
     }
 
     const data = parsed.data;
@@ -1229,7 +1207,7 @@ export async function registerRoutes(
 
     const parsed = agentAttestSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+      return res.status(400).json({ message: "Invalid request", errors: requestValidationIssues(parsed.error, req.body) });
     }
 
     const data = parsed.data;
@@ -1269,7 +1247,7 @@ export async function registerRoutes(
 
     const parsed = agentAttestSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
+      return res.status(400).json({ message: "Invalid request", errors: requestValidationIssues(parsed.error, req.body) });
     }
 
     const data = parsed.data;
@@ -1543,7 +1521,7 @@ export async function registerRoutes(
   });
 
   // ─── OpenAPI Spec for GPT Actions ─────────────────
-  app.get("/api/openapi.json", (_req, res) => {
+  app.get("/api/openapi.json", uiLimiter, (_req, res) => {
     res.json({
       openapi: "3.1.0",
       info: {
@@ -1775,11 +1753,11 @@ export async function registerRoutes(
   });
 
   // Retired unsafe demo/admin endpoints. Never allow unauthenticated data-destructive operations.
-  app.get("/api/admin/commit-health", (_req, res) => {
+  app.get("/api/admin/commit-health", uiLimiter, (_req, res) => {
     res.status(410).json({ message: "Administrative endpoint unavailable" });
   });
 
-  app.post("/api/admin/reseed", (_req, res) => {
+  app.post("/api/admin/reseed", uiLimiter, (_req, res) => {
     res.status(410).json({ message: "Administrative endpoint unavailable" });
   });
 
