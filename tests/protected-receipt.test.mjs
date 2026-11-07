@@ -114,7 +114,8 @@ test('restore fails on mutated ciphertext or tag', () => {
   const ctBuf = Buffer.from(ctMut.encryption.ciphertext, 'base64');
   ctBuf[0] ^= 1;
   ctMut.encryption.ciphertext = ctBuf.toString('base64');
-  ctMut.encryption.ciphertextSha256 = hash(ctBuf).replace('sha256:','sha256:');
+  // Recompute the ciphertext digest so only the authenticated encryption tag catches tampering.
+  ctMut.encryption.ciphertextSha256 = hash(ctBuf);
   assert.throws(() => restoreProtectedReceipt(ctMut, 'tenant-q', 'repo-q', key), /Decryption failed|ciphertext hash mismatch/);
 
   const tagMut = JSON.parse(JSON.stringify(record));
