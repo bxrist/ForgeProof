@@ -22,7 +22,7 @@ const unsupported = (): never => { throw new Error('Secure credential custody or
 /** A tenant-scoped IStorage implementation. The independently configured membership
  * allowlist is mandatory; it is never inferred from request data or untrusted Git. */
 export class GitStorage implements IStorage {
-  constructor(readonly service: GitAppStateService, readonly principal: string, readonly members: readonly string[], readonly guardUserId: string) {
+  constructor(readonly service: Pick<GitAppStateService, 'replay' | 'append'>, readonly principal: string, readonly members: readonly string[], readonly guardUserId: string) {
     if (!members.length || !members.includes(principal) || !members.includes(guardUserId)) throw new Error('Tenant authorization denied');
   }
   private authorize(id: string) { if (!this.members.includes(id)) throw new Error('Tenant authorization denied'); }
