@@ -1,5 +1,41 @@
 # Milestone 0B implementation validation — 2026-11-07
 
+## macOS remote-writer compatibility follow-up
+
+Owner-reported real private-remote validation reached a signed Genesis append,
+then the Mac remote writer rejected the local bare repository configuration.
+macOS `git init --bare` also records `core.ignorecase` and
+`core.precomposeunicode`; Linux fixtures previously omitted both. The remote
+configuration guard now permits exactly these two additional keys, with Git
+boolean validation of every occurrence (including overridden duplicates).
+The existing allowlist and rejection before transport remain in place.
+
+Three deterministic Linux regressions use temporary bare Git repositories and
+disposable synthetic signing keys. They verify signed replay/append and fresh
+worker readback with both boolean settings true and false; reject invalid values
+and overridden invalid duplicates; and reject URL rewriting, credential helpers,
+SSH commands, unconditional/conditional includes, aliases, hooks paths, worktree
+path traversal and Git proxy configuration before any transport invocation.
+
+Validation: `node --import tsx --test tests/*.test.mjs` passed **78/78**, preserving
+all prior 75 tests; `npm run check` and `git diff --check` passed. Runtime: Linux,
+Node v22.23.2, Git 2.52.0. The final full suite used host permissions for local
+Git subprocesses and loopback sockets after the sandbox terminated the initial
+targeted run without individual test diagnostics. The existing router deprecation
+warning remains. An initial host regression run exposed a test setup race with
+bare-repository initialization; the invalid-config test now awaits initialization
+before injecting invalid values, and the final full suite passed without skips.
+
+This follow-up changes only the config guard, its tests and this note. No external
+Git write, API attestation, credential insertion, production, DB, Stripe, Replit
+deployment or LifeOS change occurred. No ForgeProof receipt ID is claimed. The
+commit is local only: the operator must transfer the exact Git bundle, retest the
+real private GitHub remote on macOS with the existing pinned SSH configuration,
+and then verify upstream PR #14. Linux local transport coverage does not establish
+native macOS filesystem behavior, real SSH/GitHub acceptance or production readiness.
+
+## Original implementation validation
+
 Scope: isolated standalone ForgeProof branch `feat/milestone-0b-git-authoritative-store-20261107`, base `7e54d7c6bacdf03d7832b55535453d66955d0d6c`. This is a reviewable nonproduction implementation, not independent Darwin acceptance. No remote push, provider POST, production extraction, production change, LifeOS change, API attestation, or reuse of signing credentials occurred. Tests use generated disposable synthetic keys only. No per-file ForgeProof receipt IDs exist for this contribution.
 
 ## Actual checks

@@ -61,7 +61,18 @@ done
     // rewriting, helpers, alternate executables and includes before any network I/O.
     const config = await this.local.git(['config', '--local', '--name-only', '--list']);
     const allowed = new Set(['core.repositoryformatversion', 'core.filemode', 'core.bare', 'core.logallrefupdates', 'receive.denynonfastforwards', 'receive.denydeletes']);
-    if (config.split('\n').some(key => key && !allowed.has(key))) throw new IntegrityError('Untrusted local Git transport configuration');
+    // macOS bare init also records filesystem case/Unicode behavior. These
+    // booleans cannot select transport, executables or paths; allow no other core.*.
+    const filesystemBooleans = new Set(['core.ignorecase', 'core.precomposeunicode']);
+    const keys = new Set(config.split('\n').filter(Boolean));
+    if ([...keys].some(key => !allowed.has(key) && !filesystemBooleans.has(key))) throw new IntegrityError('Untrusted local Git transport configuration');
+    for (const key of filesystemBooleans) {
+      if (!keys.has(key)) continue;
+      try {
+        // Validate every occurrence, including overridden duplicate values.
+        await this.local.git(['config', '--local', '--bool', '--get-all', key]);
+      } catch { throw new IntegrityError('Untrusted local Git transport configuration'); }
+    }
     await this.advertised();
     const temporary = `refs/forgeproof-fetch/${randomUUID()}`;
     try {

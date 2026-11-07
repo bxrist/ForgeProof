@@ -40,6 +40,63 @@ async function fixture(t) {
   return { root, upstream, checkpoint, seed, worker, options };
 }
 
+test('macOS bare init filesystem booleans permit verified remote replay and append', async t => {
+  const f = await fixture(t); const a = await f.worker();
+  for (const value of ['true', 'false']) {
+    git(a.config.directory, 'config', 'core.ignorecase', value);
+    git(a.config.directory, 'config', 'core.precomposeunicode', value);
+    const before = await a.service.replay();
+    const id = value === 'true' ? 2 : 3;
+    const result = await a.service.append(tx(id));
+    assert.equal(result.checkpoint.sequence, before.checkpoint.sequence + 1);
+    assert.equal(result.checkpoint.commit, git(f.upstream, 'rev-parse', ref));
+    const fresh = await f.worker({ checkpoint: a.retained.at(-1) });
+    const recovered = await fresh.service.replay();
+    assert.equal(recovered.records.organizations[id].id, id);
+    assert.deepEqual(recovered.checkpoint, result.checkpoint);
+  }
+});
+
+test('macOS config allowance still rejects transport, executable, include and path injection before I/O', async t => {
+  const f = await fixture(t); const a = await f.worker();
+  git(a.config.directory, 'config', 'core.ignorecase', 'true');
+  git(a.config.directory, 'config', 'core.precomposeunicode', 'true');
+  let calls = 0;
+  a.service.transportGit = async () => { calls++; throw new Error('unexpected transport'); };
+  for (const [key, value] of [
+    ['url.ext::evil.insteadOf', f.upstream],
+    ['credential.helper', '!evil'],
+    ['core.sshCommand', 'evil'],
+    ['include.path', '../../outside-config'],
+    ['includeIf.gitdir:/**.path', '../../outside-config'],
+    ['alias.fetch', '!evil'],
+    ['core.hooksPath', '../../hooks'],
+    ['core.worktree', '../../outside'],
+    ['core.gitProxy', 'evil'],
+  ]) {
+    git(a.config.directory, 'config', key, value);
+    await assert.rejects(a.service.replay(), /Untrusted local Git transport configuration/, key);
+    await assert.rejects(a.service.append(tx(2)), /Untrusted local Git transport configuration/, key);
+    git(a.config.directory, 'config', '--unset-all', key);
+  }
+  assert.equal(calls, 0);
+});
+
+test('macOS filesystem config rejects invalid booleans including overridden duplicates before I/O', async t => {
+  const f = await fixture(t); const a = await f.worker();
+  await a.service.local.ready;
+  let calls = 0;
+  a.service.transportGit = async () => { calls++; throw new Error('unexpected transport'); };
+  for (const key of ['core.ignorecase', 'core.precomposeunicode']) {
+    git(a.config.directory, 'config', key, '../../outside');
+    await assert.rejects(a.service.replay(), /Untrusted local Git transport configuration/);
+    git(a.config.directory, 'config', '--add', key, 'true');
+    await assert.rejects(a.service.append(tx(2)), /Untrusted local Git transport configuration/);
+    git(a.config.directory, 'config', '--unset-all', key);
+  }
+  assert.equal(calls, 0);
+});
+
 test('separate clones race publication and retain both events; stale refs are not authority', async t => {
   const f = await fixture(t); const a = await f.worker(); const b = await f.worker();
   let count = 0, release; const barrier = new Promise(r => release = r);
