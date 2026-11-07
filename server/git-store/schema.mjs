@@ -49,6 +49,17 @@ export function validateRecord(kind, record) {
     positive(record.id);
     return validateReceipt({id: record.id, original: record.originalCore});
   }
+  // Historical audit metadata remains encrypted in private Git, not in safe replay.
+  if (kind === 'auditLogs' && Object.prototype.hasOwnProperty.call(record, 'auditCore')) {
+    exact(record, ['id', 'auditCore', 'encryption']);
+    positive(record.id);
+    if (typeof record.auditCore !== 'string') throw new Error('Invalid protected audit core');
+    const core = JSON.parse(record.auditCore);
+    exact(core, ['id','userId','action','resourceType','resourceId','metadata','ipAddress','createdAt']);
+    if (core.id !== record.id || core.metadata !== null) throw new Error('Invalid protected audit identity');
+    const {metadata: _protected, ...safe} = core;
+    return validateRecord('auditLogs', safe);
+  }
   exact(record, fields[kind].split(' '));
   if (kind === 'users' || kind === 'sessions') identifier(record.id); else positive(record.id);
   for (const [key, value] of Object.entries(record)) {

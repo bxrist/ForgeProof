@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import { canonical, hash, exact, identifier, positive, signatureValid, validateRecord, validateReceipt, classes } from './schema.mjs';
 import { verifyProtectedReceiptCore } from './protected-receipt.mjs';
+import { verifyProtectedAuditCore } from './protected-audit.mjs';
 const receiptSignedCore = record => Object.prototype.hasOwnProperty.call(record, 'originalCore') ? verifyProtectedReceiptCore(record) : validateReceipt(record);
 const ZERO = '0'.repeat(40);
 export const MAX_EVENT_BYTES = 8 * 1024 * 1024;
@@ -132,6 +133,7 @@ export class GitAppStateService {
         delete state.records[op.kind][op.id];
       } else if (op.action === 'put') {
         validateRecord(op.kind, op.record);
+        if (op.kind === 'auditLogs' && Object.prototype.hasOwnProperty.call(op.record, 'auditCore')) verifyProtectedAuditCore(op.record);
         if (op.kind === 'auditLogs' && existing) throw new Error('Audit logs are immutable');
         if (op.record.id !== op.id) throw new Error('Record ID mismatch');
         if (op.kind === 'receipts') {

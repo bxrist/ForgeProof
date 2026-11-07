@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import { GitAppStateService } from '../server/git-store/store.mjs';
+import {GitStorage} from '../server/git-store/storage.ts';
 import { hash } from '../server/git-store/schema.mjs';
 import { protectLegacyReceipt, restoreProtectedReceipt, verifyProtectedReceiptCore } from '../server/git-store/protected-receipt.mjs';
 
@@ -41,13 +42,22 @@ test('protected historical receipts verify keylessly in signed Git replay, recov
   const protected1=protectLegacyReceipt(original1,scope.tenant,scope.repository,vaultKey);
   const protected2=protectLegacyReceipt(original2,scope.tenant,scope.repository,vaultKey);
   const put=record=>({kind:'receipts',id:record.id,action:'put',expectedVersion:null,record});
-  const tx1={idempotencyKey:'historical-101',operations:[put(protected1)]};
+  const tx1={idempotencyKey:'historical-101',operations:[
+    {kind:'users',id:'synthetic-user',action:'put',expectedVersion:null,record:{id:'synthetic-user',email:'synthetic@example.invalid'}},
+    put(protected1)
+  ]};
   const result1=await service.append(tx1);
   assert.equal((await service.append(tx1)).duplicate,true);
   const result2=await service.append({idempotencyKey:'historical-102',operations:[put(protected2)]});
   const current=await service.replay();
   assert.equal(current.events.length,2);
   assert.equal(current.receiptHead,r2.entryHash);
+  const storage=new GitStorage(service,'synthetic-user',['synthetic-user'],'synthetic-user');
+  const safeReceipts=await storage.getAttestations('synthetic-user');
+  assert.deepEqual(safeReceipts.map(r=>r.id),[102,101]);
+  assert.equal(safeReceipts[0].metadata,null);
+  assert.equal(safeReceipts[0].auditDetails,null);
+  assert.equal('encryption' in safeReceipts[0],false);
   assert.equal(current.records.receipts[101].original,undefined);
   assert.equal(verifyProtectedReceiptCore(current.records.receipts[102]).entryHash,r2.entryHash);
   assert.deepEqual(restoreProtectedReceipt(current.records.receipts[101],scope.tenant,scope.repository,vaultKey),original1);

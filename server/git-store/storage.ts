@@ -44,7 +44,9 @@ export class GitStorage implements IStorage {
     };
     for (const row of Object.values(records.users)) this.authorize(String(row.id));
     for (const [kind, rows] of Object.entries(records)) for (const row of Object.values(rows)) {
-      const r = kind === 'receipts' ? JSON.parse(String(row.original)) as AppRecord : row;
+      const r = kind === 'receipts'
+        ? JSON.parse(String(row.originalCore ?? row.original)) as AppRecord
+        : (kind === 'auditLogs' && row.auditCore ? JSON.parse(String(row.auditCore)) as AppRecord : row);
       for (const field of ['userId','ownerId']) if (r[field] != null) {
         this.authorize(String(r[field]));
         if (!exists('users',r[field])) throw new Error('Missing user relation');
@@ -91,7 +93,7 @@ export class GitStorage implements IStorage {
         if (!audit || audit.action !== 'put' || audit.record.resourceId !== fingerprint) throw new Error('Idempotency request conflict');
         // Return the original result, even after subsequent updates/cancellation.
         const first = previous.body.operations[0];
-        return (first.action === 'put' ? decode(first.kind === 'receipts' ? JSON.parse(String(first.record.original)) : first.record) : undefined) as T;
+        return (first.action === 'put' ? decode(first.kind === 'receipts' ? JSON.parse(String(first.record.originalCore ?? first.record.original)) : first.kind === 'auditLogs' && first.record.auditCore ? JSON.parse(String(first.record.auditCore)) : first.record) : undefined) as T;
       }
       const guard = state.records.users[this.guardUserId];
       if (!guard) throw new Error('Trusted tenant bootstrap user required');
@@ -138,7 +140,7 @@ export class GitStorage implements IStorage {
   updateRepository(id: number,data: Partial<S.InsertRepository>) { return this.update('repositories',id,data); }
   updateRepositoryLastSynced(id: number) { return this.update('repositories',id,{lastSyncedAt:new Date()}); }
   deleteRepository(id: number) { return this.remove('repositories',id); }
-  private async receipts() { return Object.values((await this.state()).records.receipts).map(r=>decode<S.AttestationReceipt>(JSON.parse(String(r.original)))!); }
+  private async receipts() { return Object.values((await this.state()).records.receipts).map(r=>decode<S.AttestationReceipt>(JSON.parse(String(r.originalCore ?? r.original)))!); }
   async getAttestations(userId: string) { this.authorize(userId); return (await this.receipts()).filter(r=>r.userId===userId).reverse(); }
   async getSystemAttestations() { return this.members.includes('forgeproof-system') ? this.getAttestations('forgeproof-system') : []; }
   async getAllAttestationsOrdered() { return (await this.receipts()).sort((a,b)=>a.id-b.id); }
@@ -271,7 +273,16 @@ export class GitStorage implements IStorage {
   async removeOrgMember(id: number,userId: string) { const member=await this.getOrgMember(id,userId); if (member) await this.remove('orgMembers',member.id); }
   async updateOrgMemberRole(id: number,userId: string,role: string) { const member=await this.getOrgMember(id,userId); if (!member) throw new Error('Member not found'); await this.update('orgMembers',member.id,{role}); }
   createAuditLog(data: S.InsertAuditLog) { if (data.metadata != null) unsupported(); const {metadata,...safe}=data; return this.create<S.AuditLog>('auditLogs',safe,{userId:null,resourceType:null,resourceId:null,ipAddress:null}); }
-  async getAuditLogs(userId?: string,limit=100) { if(userId) this.authorize(userId); return (await this.rows<S.AuditLog>('auditLogs')).filter(a=>!userId||a.userId===userId).reverse().slice(0,limit).map(a=>({...a,metadata:null})); }
+  async getAuditLogs(userId?: string,limit=100) {
+    if (userId) this.authorize(userId);
+    // this.state() performs full signed Git replay and verifies protected audit
+    // cores before JSON.parse here. Unauthenticated/corrupt history fails closed.
+    const rows = Object.values((await this.state()).records.auditLogs)
+      .map(r => decode<S.AuditLog>(r.auditCore ? JSON.parse(String(r.auditCore)) : r)!);
+    // Protected historical metadata never enters the IStorage HTTP/UI read model.
+    return rows.filter(a => !userId || a.userId === userId).reverse().slice(0,limit)
+      .map(a => ({...a,metadata:null}));
+  }
   async getAuditLogsByResource(type: string,id: string) { return (await this.getAuditLogs(undefined,Number.MAX_SAFE_INTEGER)).filter(a=>a.resourceType===type&&a.resourceId===id); }
   async clearAllAttestations(): Promise<void> { throw new Error('Immutable history cannot be cleared'); }
   async getSubscription(userId: string) { this.authorize(userId); return (await this.rows<S.Subscription>('subscriptions')).find(s=>s.userId===userId); }
