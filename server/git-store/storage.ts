@@ -95,7 +95,7 @@ export class GitStorage implements IStorage {
     return { kind,id:record.id,action:'put',expectedVersion:state.versions[`${kind}/${record.id}`] ?? null,record };
   }
   private del(state: Replay, kind: RecordClass,id: number): Operation { return {kind,id,action:'delete',expectedVersion:state.versions[`${kind}/${id}`] ?? null}; }
-  private async mutate<T>(label: string, input: unknown, build: (state: Replay) => { operations: Operation[]; result: T }, key: string = randomUUID()): Promise<T> {
+  private async mutate<T>(label: string, input: unknown, build: (state: Replay) => ({ operations: Operation[]; result: T } | Promise<{ operations: Operation[]; result: T }>), key: string = randomUUID()): Promise<T> {
     const idempotencyKey = digest([this.principal,label,key]);
     const fingerprint = digest([label,encode(input)]);
     for (let attempt=0; attempt<8; attempt++) {
@@ -110,7 +110,7 @@ export class GitStorage implements IStorage {
       }
       const guard = state.records.users[this.guardUserId];
       if (!guard) throw new Error('Trusted tenant bootstrap user required');
-      const {operations,result} = build(state);
+      const {operations,result} = await build(state);
       const auditId=Math.max(this.next(state,'auditLogs'),...operations.filter(o=>o.kind==='auditLogs').map(o=>Number(o.id)+1));
       const audit = {id:auditId,userId:this.principal,action:label,resourceType:'storage-request',resourceId:fingerprint,createdAt:new Date().toISOString()};
       const all = [...operations];
@@ -253,6 +253,78 @@ export class GitStorage implements IStorage {
   }
   async getLatestAttestation() { return (await this.getAllAttestationsOrdered()).at(-1); }
   createAttestation(data: S.InsertAttestationReceipt) { return this.createAttestationAndCount(data,randomUUID()); }
+  async issueAttestationWithSigner(source: Omit<S.InsertAttestationReceipt,'signature'|'publicKey'|'entryHash'|'prevEntryHash'|'createdAt'>, signer: { publicKey: string; sign(input: Buffer): Promise<string> }, requestId: string) {
+    if (!Buffer.isBuffer(this.receiptEncryptionKey) || this.receiptEncryptionKey.length !== 32)
+      throw new Error('Receipt protection key required');
+    const encryptionKey = this.receiptEncryptionKey;
+    const scope = this.mailBinding();
+    if (!this.members.includes(this.principal)) throw new Error('Receipt owner denied');
+    if (!source || typeof source !== 'object' || Array.isArray(source)) throw new Error('Invalid attestation source');
+    if (!signer || typeof signer !== 'object' || typeof signer.publicKey !== 'string' || !signer.publicKey || typeof signer.sign !== 'function')
+      throw new Error('Trusted signer required');
+    if (typeof requestId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,128}$/.test(requestId))
+      throw new Error('Invalid requestId');
+    const src = encode(source) as unknown as Omit<S.InsertAttestationReceipt,'signature'|'publicKey'|'entryHash'|'prevEntryHash'|'createdAt'>;
+    const allowed = new Set(['userId','orgId','repositoryId','fileName','filePath','fileHash','modelName','modelProvider','countryOfOrigin','detectedCountry','complianceStatus','receiptVersion','signedAt','attestationType','parentAttestationId','auditVerdict','auditDetails','gitCommitUrl','gitCommitMessage','metadata']);
+    if (Object.keys(src).some(field => !allowed.has(field))) throw new Error('Unknown attestation field');
+    if (src.userId !== this.principal || !this.members.includes(src.userId)) throw new Error('Receipt owner denied');
+    if (src.receiptVersion !== 'v1') throw new Error('Unsupported original receipt version');
+    if (typeof src.signedAt !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(src.signedAt) || !Number.isFinite(Date.parse(src.signedAt)))
+      throw new Error('Explicit signedAt required');
+    if (src.gitCommitUrl != null || src.gitCommitMessage != null)
+      throw new Error('GitHub export provenance requires a signed annotation');
+    const sourceFingerprint = createHmac('sha256',encryptionKey)
+      .update('ForgeProof:atomic-signed-receipt:v1\n')
+      .update(stable(src)).digest('hex');
+    return this.mutate<S.AttestationReceipt>('attest-atomic-signed-and-count',
+      {requestId,requestProof:'hmac-sha256:'+sourceFingerprint}, async state => {
+      // Replay contains business state, not signing trust. Trust MUST come
+      // from the independently pinned Git service configuration, never from
+      // a caller record or a replayed organization.
+      const service = this.service as typeof this.service & {
+        trust?: {receiptKeys?: readonly string[]};
+        options?: {trust?: {receiptKeys?: readonly string[]}};
+      };
+      const trusted = service.trust?.receiptKeys ?? service.options?.trust?.receiptKeys;
+      if (!Array.isArray(trusted) || !trusted.includes(signer.publicKey))
+        throw new Error('Signer key not trusted');
+      const sub = Object.values(state.records.subscriptions).find(row=>row.userId===src.userId);
+      if (!sub || !['active','trialing'].includes(String(sub.status)) ||
+          (Number(sub.attestationLimit)!==-1 && Number(sub.attestationCount)>=Number(sub.attestationLimit)))
+        throw new Error('Quota or subscription denied');
+      const id = this.next(state,'receipts');
+      const previousHash = typeof state.receiptHead === 'string' && /^[a-f0-9]{64}$/.test(state.receiptHead) ? state.receiptHead : 'genesis';
+      const entryHash = createHash('sha256').update([
+        src.fileHash,src.modelName,src.modelProvider,src.countryOfOrigin,previousHash,src.signedAt
+      ].join('|')).digest('hex');
+      const signature = await signer.sign(Buffer.from([entryHash,src.fileHash,src.signedAt].join('|')));
+      const original = encode({
+        id,userId:src.userId,orgId:src.orgId ?? null,
+        repositoryId:src.repositoryId ?? null,fileName:src.fileName,
+        filePath:src.filePath,fileHash:src.fileHash,
+        modelName:src.modelName,modelProvider:src.modelProvider,
+        countryOfOrigin:src.countryOfOrigin,
+        detectedCountry:src.detectedCountry ?? null,
+        complianceStatus:src.complianceStatus ?? 'unverified',
+        signature,publicKey:signer.publicKey,
+        entryHash,prevEntryHash:previousHash === 'genesis' ? null : previousHash,
+        receiptVersion:src.receiptVersion,signedAt:src.signedAt,
+        createdAt:new Date(),attestationType:src.attestationType ?? 'origin',
+        parentAttestationId:src.parentAttestationId ?? null,
+        auditVerdict:src.auditVerdict ?? null,
+        auditDetails:src.auditDetails ?? null,
+        gitCommitUrl:null,
+        gitCommitMessage:null,
+        metadata:src.metadata ?? null
+      });
+      const sealed = protectLegacyReceipt(Buffer.from(JSON.stringify(original)), scope.tenant, scope.repository, encryptionKey);
+      const publicView = decode<S.AttestationReceipt>(JSON.parse(sealed.originalCore))!;
+      return {operations:[
+        this.put(state,'receipts',encode(sealed)),
+        this.put(state,'subscriptions',{...sub,attestationCount:Number(sub.attestationCount)+1})
+      ],result:publicView};
+    },requestId);
+  }
   createAttestationAndCount(data: S.InsertAttestationReceipt,key: string) {
     // The source signature is created by the existing trusted ForgeProof signer,
     // BEFORE entering IStorage. Never invent a timestamp or re-sign on retry.
