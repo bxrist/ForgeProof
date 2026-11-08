@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { UnavailableCustodian, type CredentialCustodian } from './custody';
 import type { IStorage } from '../storage';
 import type { User } from '../../shared/models/auth';
@@ -16,6 +16,7 @@ type InsertPrivatePendingEmail = Omit<PrivatePendingEmail,'id'|'createdAt'> & {
   status?: 'pending' | 'sent' | 'failed'; retryCount?: number; nextRetryAt?: Date;
 };
 import { protectLegacyAuditLog } from './protected-audit.mjs';
+import { protectLegacyReceipt } from './protected-receipt.mjs';
 
 function stable(v: unknown): string {
   if (Array.isArray(v)) return '['+v.map(stable).join(',')+']';
@@ -35,7 +36,7 @@ const unsupported = (): never => { throw new Error('Secure credential custody or
 /** A tenant-scoped IStorage implementation. The independently configured membership
  * allowlist is mandatory; it is never inferred from request data or untrusted Git. */
 export class GitStorage implements IStorage {
-  constructor(readonly service: Pick<GitAppStateService, 'replay' | 'append'>, readonly principal: string, readonly members: readonly string[], readonly guardUserId: string, readonly custody: CredentialCustodian = new UnavailableCustodian(), readonly custodyScope: string = '', readonly mailEncryptionKey?: Buffer, readonly auditEncryptionKey?: Buffer) {
+  constructor(readonly service: Pick<GitAppStateService, 'replay' | 'append'>, readonly principal: string, readonly members: readonly string[], readonly guardUserId: string, readonly custody: CredentialCustodian = new UnavailableCustodian(), readonly custodyScope: string = '', readonly mailEncryptionKey?: Buffer, readonly auditEncryptionKey?: Buffer, readonly receiptEncryptionKey?: Buffer) {
     if (!members.length || !members.includes(principal) || !members.includes(guardUserId)) throw new Error('Tenant authorization denied');
   }
   private authorize(id: string) { if (!this.members.includes(id)) throw new Error('Tenant authorization denied'); }
@@ -184,12 +185,80 @@ export class GitStorage implements IStorage {
   async getLatestAttestation() { return (await this.getAllAttestationsOrdered()).at(-1); }
   createAttestation(data: S.InsertAttestationReceipt) { return this.createAttestationAndCount(data,randomUUID()); }
   createAttestationAndCount(data: S.InsertAttestationReceipt,key: string) {
-    data = JSON.parse(JSON.stringify(data));
-    return this.mutate<S.AttestationReceipt>('attest-and-count',data,state=> {
-      const sub = Object.values(state.records.subscriptions).find(s=>s.userId===data.userId);
-      if (!sub || !['active','trialing'].includes(String(sub.status)) || (Number(sub.attestationLimit)!==-1 && Number(sub.attestationCount)>=Number(sub.attestationLimit))) throw new Error('Quota or subscription denied');
-      const receipt = encode({orgId:null,repositoryId:null,detectedCountry:null,complianceStatus:'unverified',attestationType:'origin',parentAttestationId:null,auditVerdict:null,auditDetails:null,prevEntryHash:null,receiptVersion:'v1',signedAt:null,gitCommitUrl:null,gitCommitMessage:null,metadata:null,...data,id:this.next(state,'receipts'),createdAt:new Date()});
-      return {operations:[this.put(state,'receipts',{id:receipt.id,original:JSON.stringify(receipt)}),this.put(state,'subscriptions',{...sub,attestationCount:Number(sub.attestationCount)+1})],result:decode<S.AttestationReceipt>(receipt)!};
+    // The source signature is created by the existing trusted ForgeProof signer,
+    // BEFORE entering IStorage. Never invent a timestamp or re-sign on retry.
+    if (!Buffer.isBuffer(this.receiptEncryptionKey) || this.receiptEncryptionKey.length !== 32)
+      throw new Error('Receipt protection key required');
+    const encryptionKey = this.receiptEncryptionKey;
+    const scope = this.mailBinding();
+    if (!data || typeof data !== 'object' || Array.isArray(data))
+      throw new Error('Invalid attestation input');
+    const originalInput = encode(data) as unknown as S.InsertAttestationReceipt;
+    const allowed = new Set(['userId','orgId','repositoryId','fileName','filePath','fileHash',
+      'modelName','modelProvider','countryOfOrigin','detectedCountry','complianceStatus',
+      'signature','publicKey','entryHash','prevEntryHash','receiptVersion','signedAt',
+      'attestationType','parentAttestationId','auditVerdict','auditDetails','gitCommitUrl',
+      'gitCommitMessage','metadata']);
+    if (Object.keys(originalInput).some(field => !allowed.has(field)))
+      throw new Error('Unknown attestation field');
+    if (originalInput.userId !== this.principal || !this.members.includes(originalInput.userId))
+      throw new Error('Receipt owner denied');
+    if (typeof originalInput.signedAt !== 'string' ||
+        !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(originalInput.signedAt) ||
+        !Number.isFinite(Date.parse(originalInput.signedAt)))
+      throw new Error('Explicit signedAt required');
+    if (typeof originalInput.signature !== 'string' || !originalInput.signature)
+      throw new Error('Original signed signature required');
+    if (typeof originalInput.entryHash !== 'string' || !/^[a-f0-9]{64}$/.test(originalInput.entryHash))
+      throw new Error('Original entryHash required');
+    if (originalInput.receiptVersion !== 'v1')
+      throw new Error('Unsupported original receipt version');
+    // Export provenance is NOT part of the original legacy Ed25519 signature.
+    // It must be independently committed by the owner after a real GitHub push.
+    if (originalInput.gitCommitUrl != null || originalInput.gitCommitMessage != null)
+      throw new Error('GitHub export provenance requires a signed annotation');
+
+    // Any private metadata is used solely for this HMAC and AES-GCM envelope.
+    // An ordinary SHA256(data) in the signed audit trail would permit offline
+    // dictionary attacks against private fields.
+    const sourceFingerprint = createHmac('sha256',encryptionKey)
+      .update('ForgeProof:new-signed-receipt:v2\n')
+      .update(stable(originalInput)).digest('hex');
+    return this.mutate<S.AttestationReceipt>('attest-and-count',
+      {requestProof:'hmac-sha256:'+sourceFingerprint},state=> {
+      const sub = Object.values(state.records.subscriptions).find(row=>row.userId===originalInput.userId);
+      if (!sub || !['active','trialing'].includes(String(sub.status)) ||
+          (Number(sub.attestationLimit)!==-1 && Number(sub.attestationCount)>=Number(sub.attestationLimit)))
+        throw new Error('Quota or subscription denied');
+      const id = this.next(state,'receipts');
+      const original = encode({
+        id,userId:originalInput.userId,orgId:originalInput.orgId ?? null,
+        repositoryId:originalInput.repositoryId ?? null,fileName:originalInput.fileName,
+        filePath:originalInput.filePath,fileHash:originalInput.fileHash,
+        modelName:originalInput.modelName,modelProvider:originalInput.modelProvider,
+        countryOfOrigin:originalInput.countryOfOrigin,
+        detectedCountry:originalInput.detectedCountry ?? null,
+        complianceStatus:originalInput.complianceStatus ?? 'unverified',
+        signature:originalInput.signature,publicKey:originalInput.publicKey,
+        entryHash:originalInput.entryHash,prevEntryHash:originalInput.prevEntryHash ?? null,
+        receiptVersion:originalInput.receiptVersion,signedAt:originalInput.signedAt,
+        createdAt:new Date(),attestationType:originalInput.attestationType ?? 'origin',
+        parentAttestationId:originalInput.parentAttestationId ?? null,
+        auditVerdict:originalInput.auditVerdict ?? null,
+        auditDetails:originalInput.auditDetails ?? null,
+        gitCommitUrl:originalInput.gitCommitUrl ?? null,
+        gitCommitMessage:originalInput.gitCommitMessage ?? null,
+        metadata:originalInput.metadata ?? null
+      });
+      // protectLegacyReceipt verifies the original Ed25519 signature and
+      // preserves all private fields as exact encrypted source bytes.
+      const sealed = protectLegacyReceipt(Buffer.from(JSON.stringify(original)),
+        scope.tenant,scope.repository,encryptionKey);
+      const publicView = decode<S.AttestationReceipt>(JSON.parse(sealed.originalCore))!;
+      return {operations:[
+        this.put(state,'receipts',encode(sealed)),
+        this.put(state,'subscriptions',{...sub,attestationCount:Number(sub.attestationCount)+1})
+      ],result:publicView};
     },key);
   }
   async updateAttestationGitCommitUrl(id: number,url: string,message?: string): Promise<void> {

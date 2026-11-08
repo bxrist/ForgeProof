@@ -4,7 +4,7 @@ import {mkdtemp,rm,writeFile,chmod} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {execFileSync} from 'node:child_process';
-import {generateKeyPairSync,sign,createHash} from 'node:crypto';
+import {generateKeyPairSync,sign,createHash,randomBytes} from 'node:crypto';
 import {GitAppStateService} from '../server/git-store/store.mjs';
 import {main as migrateMain} from '../server/git-store/cli.mjs';
 import {GitStorage} from '../server/git-store/storage.ts';
@@ -23,7 +23,8 @@ async function fixture(t) {
   const options={directory,tenant:'tenant-a',repository:'app',trust,checkpoint:null,signer};
   const service=new GitAppStateService(options);
   await service.append({idempotencyKey:'bootstrap',operations:['alice','bob'].map(id=>({kind:'users',id,action:'put',expectedVersion:null,record:{id}}))});
-  return {root,options,service,storage:new GitStorage(service,'alice',['alice','bob'],'alice')};
+  const receiptKey=randomBytes(32);
+  return {root,options,service,receiptKey,storage:new GitStorage(service,'alice',['alice','bob'],'alice',undefined,'',undefined,undefined,receiptKey)};
 }
 const repo={userId:'alice',githubId:7,name:'synthetic',fullName:'alice/synthetic',url:'https://example.invalid/repo'};
 function receipt(id,userId,previous=null) {
@@ -61,7 +62,7 @@ test('independent writers serialize ID allocation and global unique relation che
   assert.equal(attempts.filter(r=>r.status==='fulfilled').length,1);
 });
 test('receipt and quota append atomically, retry once, reconcile cancellation without losing commercial IDs',async t=> {
-  const {options,storage,service}=await fixture(t);
+  const {options,storage,service,receiptKey}=await fixture(t);
   const sub=await storage.createSubscription({userId:'alice',plan:'pro',attestationLimit:1,stripeCustomerId:'cus_synthetic',stripeSubscriptionId:'sub_synthetic',currentPeriodStart:new Date('2026-11-01')});
   const r=receipt(1,'alice'); const {id,...input}=r;
   const first=await storage.createAttestationAndCount(input,'attest-1');
@@ -71,7 +72,7 @@ test('receipt and quota append atomically, retry once, reconcile cancellation wi
   await assert.rejects(storage.createAttestationAndCount(input,'attest-2'),/Quota/);
   await storage.reconcileSubscription(sub.id,{status:'canceled'},'evt_cancel');
   await storage.reconcileSubscription(sub.id,{status:'canceled'},'evt_cancel');
-  const restarted=new GitStorage(new GitAppStateService({...options,checkpoint:(await service.replay()).checkpoint}),'alice',['alice','bob'],'alice');
+  const restarted=new GitStorage(new GitAppStateService({...options,checkpoint:(await service.replay()).checkpoint}),'alice',['alice','bob'],'alice',undefined,'',undefined,undefined,receiptKey);
   assert.equal((await restarted.getSubscription('alice')).stripeSubscriptionId,'sub_synthetic');
   assert.equal((await restarted.getSubscription('alice')).attestationCount,1);
   await assert.rejects(restarted.reconcileSubscription(sub.id,{status:'active'},'evt_cancel'),/Idempotency/);
