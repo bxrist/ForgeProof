@@ -1,14 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHmac, hkdfSync, randomBytes } from 'node:crypto';
 import {
   protectLegacyAuditLog,
   verifyProtectedAuditCore,
   restoreProtectedAuditLog,
 } from '../server/git-store/protected-audit.mjs';
 
-function sha256(bytes) {
-  return 'sha256:' + createHash('sha256').update(bytes).digest('hex');
+const HKDF_SALT = Buffer.from('ForgeProof/protected-audit/hkdf-salt/v3', 'utf8');
+const HKDF_INFO = Buffer.from('ForgeProof/protected-audit/plaintext-hmac/v3', 'utf8');
+
+function hmacForAuditV3(key, bytes) {
+  const subkey = hkdfSync('sha256', key, HKDF_SALT, HKDF_INFO, 32);
+  return `hmac-sha256:${createHmac('sha256', subkey).update(bytes).digest('hex')}`;
 }
 
 function baseRecord() {
@@ -39,10 +43,11 @@ test('protect + verify + restore roundtrip preserves exact original bytes', () =
   const verified = verifyProtectedAuditCore(record);
   assert.equal(verified.id, 7);
 
-  assert.equal(record.encryption.version, 2);
+  assert.equal(record.encryption.version, 3);
   assert.equal(record.encryption.algorithm, 'aes-256-gcm');
-  assert.equal(record.encryption.plaintextSha256, sha256(original));
+  assert.equal(record.encryption.plaintextHmac, hmacForAuditV3(key, original));
   assert.equal(record.auditCore.includes('"metadata":null'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(record.encryption, 'plaintextSha256'), false);
 
   const restored = restoreProtectedAuditLog(record, 'tenant-a', 'repo-a', key);
   assert.equal(Buffer.compare(restored, original), 0);
@@ -53,7 +58,7 @@ test('wrong key fails restore', () => {
   const wrongKey = randomBytes(32);
   const original = Buffer.from(JSON.stringify(baseRecord()), 'utf8');
   const record = protectLegacyAuditLog(original, 'tenant-a', 'repo-a', key);
-  assert.throws(() => restoreProtectedAuditLog(record, 'tenant-a', 'repo-a', wrongKey), /Decryption failed/);
+  assert.throws(() => restoreProtectedAuditLog(record, 'tenant-a', 'repo-a', wrongKey), /Decryption failed|plaintext hmac mismatch/);
 });
 
 test('swapped tenant fails restore', () => {
