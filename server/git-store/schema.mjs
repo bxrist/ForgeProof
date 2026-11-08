@@ -27,7 +27,7 @@ export function signatureValid(payload, signature, publicKey) {
 const common = 'createdAt updatedAt';
 // All credentials, session content, arbitrary metadata and billing instrument data are excluded.
 const fields = {
-  users: `id email firstName lastName profileImageUrl githubUsername githubTokenRef notificationEmail stripeCustomerId defaultRepoId credentialRef ${common}`,
+  users: `id email firstName lastName profileImageUrl githubUsername githubTokenRef notificationEmail notifyOnGitFailure stripeCustomerId defaultRepoId detailRepoId lastActiveTab credentialRef ${common}`,
   repositories: `id userId orgId githubId name fullName url defaultBranch description lastSyncedAt ${common}`,
   organizations: `id name slug ownerId description ${common}`,
   orgMembers: `id orgId userId role ${common}`,
@@ -96,7 +96,7 @@ export function validateRecord(kind, record) {
     if (value === null || key === 'id') continue;
     if (numbers.has(key)) { if (!Number.isSafeInteger(value) || value < -1) throw new Error('Invalid numeric field'); }
     else if (key === 'permissions') { if (!Array.isArray(value) || value.some(v => typeof v !== 'string' || !/^attest:(read|write)$/.test(v))) throw new Error('Invalid permissions'); }
-    else if (key === 'isActive') { if (typeof value !== 'boolean') throw new Error('Invalid boolean'); }
+    else if (key === 'isActive' || key === 'notifyOnGitFailure') { if (typeof value !== 'boolean') throw new Error('Invalid boolean'); }
     else { text(value); if ((key.endsWith('At') || ['currentPeriodStart','currentPeriodEnd'].includes(key)) && !Number.isFinite(Date.parse(value))) throw new Error('Invalid timestamp'); if (['userId','ownerId'].includes(key)) identifier(value); if (key.endsWith('Ref') && !/^custodian:[a-zA-Z0-9_-]{1,128}$/.test(value)) throw new Error('Invalid custodian reference'); }
   }
   const required = {

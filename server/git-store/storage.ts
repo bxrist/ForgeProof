@@ -166,14 +166,17 @@ export class GitStorage implements IStorage {
     return Object.assign({
       email:null,firstName:null,lastName:null,profileImageUrl:null,
       githubUsername:null,notificationEmail:null,stripeCustomerId:null,
+      notifyOnGitFailure:true,detailRepoId:null,lastActiveTab:null,
       defaultRepoId:null,createdAt:null,updatedAt:null
     },safe,{githubToken});
   }
   async updateUser(id: string,data: Partial<User>): Promise<void> {
     this.authorize(id);
+    if (id !== this.principal) throw new Error('User update owner denied');
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid user update');
     const allowed = new Set(['email','firstName','lastName','profileImageUrl','githubUsername',
-      'notificationEmail','stripeCustomerId','defaultRepoId','createdAt','updatedAt','githubToken']);
+      'notificationEmail','notifyOnGitFailure','stripeCustomerId','defaultRepoId',
+      'detailRepoId','lastActiveTab','createdAt','updatedAt','githubToken']);
     if (Object.keys(data).some(key=>!allowed.has(key))) throw new Error('Unsupported user update field');
     const hasToken = Object.prototype.hasOwnProperty.call(data,'githubToken');
     if (!hasToken) {
