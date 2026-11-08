@@ -143,8 +143,74 @@ export class GitStorage implements IStorage {
   private remove(kind: RecordClass,id: number): Promise<void> {
     return this.mutate(`delete:${kind}`,{id},state => ({operations:[this.del(state,kind,id)],result:undefined}));
   }
-  async getUser(id: string) { this.authorize(id); const row = await this.row<User>('users',id); return row ? Object.assign({email:null,firstName:null,lastName:null,profileImageUrl:null,githubUsername:null,notificationEmail:null,stripeCustomerId:null,defaultRepoId:null,createdAt:null,updatedAt:null},row,{githubToken:null}) : undefined; }
-  async updateUser(id: string,data: Partial<User>) { this.authorize(id); if ('githubToken' in data || 'id' in data) unsupported(); await this.update('users',id,data); }
+  private githubCredentialScope(id: string): string {
+    // Bind external OAuth material to BOTH the authenticated Git tenant and
+    // immutable user ID. A signed Git user record pointing to another user's
+    // opaque ref cannot decrypt that person's credential.
+    return this.custodyBinding()+':github:'+createHash('sha256').update(id).digest('hex');
+  }
+  async getUser(id: string): Promise<User | undefined> {
+    this.authorize(id);
+    const row = await this.row<User & { githubTokenRef?: string | null }>('users',id);
+    if (!row) return undefined;
+    const { githubTokenRef, ...safe } = row;
+    let githubToken: string | null = null;
+    // Only the authenticated subject may obtain decrypted GitHub credentials.
+    // An existing vault reference with missing custody is a hard failure, not
+    // evidence that the account is disconnected.
+    if (id === this.principal && githubTokenRef != null) {
+      const token = await this.custody.recoverGithubToken(this.githubCredentialScope(id), githubTokenRef);
+      if (!token) throw new Error('GitHub credential recovery unavailable');
+      githubToken = token;
+    }
+    return Object.assign({
+      email:null,firstName:null,lastName:null,profileImageUrl:null,
+      githubUsername:null,notificationEmail:null,stripeCustomerId:null,
+      defaultRepoId:null,createdAt:null,updatedAt:null
+    },safe,{githubToken});
+  }
+  async updateUser(id: string,data: Partial<User>): Promise<void> {
+    this.authorize(id);
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid user update');
+    const allowed = new Set(['email','firstName','lastName','profileImageUrl','githubUsername',
+      'notificationEmail','stripeCustomerId','defaultRepoId','createdAt','updatedAt','githubToken']);
+    if (Object.keys(data).some(key=>!allowed.has(key))) throw new Error('Unsupported user update field');
+    const hasToken = Object.prototype.hasOwnProperty.call(data,'githubToken');
+    if (!hasToken) {
+      await this.update('users',id,data);
+      return;
+    }
+    if (id !== this.principal) throw new Error('Credential owner denied');
+    const scope = this.githubCredentialScope(id);
+    const token = (data as {githubToken?: unknown}).githubToken;
+    if (!(token===null || (typeof token==='string' && token.length>0 &&
+      token.length<=16384 && !/[\x00-\x1F\x7F]/.test(token))))
+      throw new Error('Invalid GitHub credential input');
+    const { githubToken:_secret, ...publicPatch } = data;
+    const oldState = await this.state();
+    const user = oldState.records.users[id];
+    if (!user) throw new Error('Record not found');
+    const previousRef = typeof user.githubTokenRef === 'string' ? user.githubTokenRef : null;
+    // Stage in an independently encrypted CAS vault, BEFORE the signed Git
+    // authorization pointer changes. Never destroy the old secret before Git
+    // publication is confirmed: an ambiguous push must remain recoverable.
+    const nextRef = typeof token === 'string'
+      ? await this.custody.stage(scope,id+':github-oauth:'+randomUUID(),
+        {kind:'github-oauth',material:token}) : null;
+    await this.mutate<void>('update:users:github-custody',
+      {id,publicPatch,githubTokenRef:nextRef},state=>{
+      const prior=state.records.users[id];
+      if (!prior) throw new Error('Record not found');
+      if ((prior.githubTokenRef ?? null)!==previousRef)
+        throw new Error('Concurrent GitHub credential update; retry');
+      const record=encode({...prior,...publicPatch,id,githubTokenRef:nextRef});
+      return {operations:[this.put(state,'users',record)],result:undefined};
+    });
+    // Cleanup failure is explicitly surfaced. It does not undo the already
+    // published safe pointer. Retrying cleanup must not revoke the new token.
+    if (previousRef && previousRef !== nextRef)
+      await this.custody.destroy(scope,previousRef);
+  }
   async getRepositories(userId: string) { this.authorize(userId); return (await this.rows<S.Repository>('repositories')).filter(r=>r.userId===userId); }
   getRepository(id: number) { return this.row<S.Repository>('repositories',id); }
   async getRepositoryByGithubId(githubId: number,userId: string) { return (await this.getRepositories(userId)).find(r=>r.githubId===githubId); }

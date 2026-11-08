@@ -27,7 +27,7 @@ export function signatureValid(payload, signature, publicKey) {
 const common = 'createdAt updatedAt';
 // All credentials, session content, arbitrary metadata and billing instrument data are excluded.
 const fields = {
-  users: `id email firstName lastName profileImageUrl githubUsername notificationEmail stripeCustomerId defaultRepoId credentialRef ${common}`,
+  users: `id email firstName lastName profileImageUrl githubUsername githubTokenRef notificationEmail stripeCustomerId defaultRepoId credentialRef ${common}`,
   repositories: `id userId orgId githubId name fullName url defaultBranch description lastSyncedAt ${common}`,
   organizations: `id name slug ownerId description ${common}`,
   orgMembers: `id orgId userId role ${common}`,
@@ -87,6 +87,10 @@ export function validateRecord(kind, record) {
     return;
   }
   exact(record, fields[kind].split(' '));
+  if (kind === 'users' && record.githubTokenRef != null &&
+      (typeof record.githubTokenRef !== 'string' ||
+       !/^custodian:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(record.githubTokenRef)))
+    throw new Error('Invalid GitHub custody reference');
   if (kind === 'users' || kind === 'sessions') identifier(record.id); else positive(record.id);
   for (const [key, value] of Object.entries(record)) {
     if (value === null || key === 'id') continue;

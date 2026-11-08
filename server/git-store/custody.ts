@@ -1,18 +1,20 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 
-export type Credential = { kind: 'api-key'; verifier: string; prefix: string } | { kind: 'oidc-session'; material: string };
+export type Credential = { kind: 'api-key'; verifier: string; prefix: string } | { kind: 'oidc-session'; material: string } | { kind: 'github-oauth'; material: string };
 export interface CredentialCustodian {
   /** Stable request IDs and uniqueness are scoped to a trusted tenant store binding. */
   stage(scope: string, request: string, value: Credential): Promise<string>;
   matches(scope: string, ref: string, verifier: string): Promise<boolean>;
   destroy(scope: string, ref: string): Promise<void>;
   recoverSession(scope: string, ref: string): Promise<string | undefined>;
+  recoverGithubToken(scope: string, ref: string): Promise<string | undefined>;
 }
 export class UnavailableCustodian implements CredentialCustodian {
   async stage(_s: string, _r: string, _v: Credential): Promise<string> { throw new Error('Secure credential custody unavailable'); }
   async matches(_s: string, _r: string, _v: string): Promise<boolean> { throw new Error('Secure credential custody unavailable'); }
   async destroy(_s: string, _r: string): Promise<void> { throw new Error('Secure credential custody unavailable'); }
   async recoverSession(_s: string, _r: string): Promise<string | undefined> { throw new Error('Secure credential custody unavailable'); }
+  async recoverGithubToken(_s: string, _r: string): Promise<string | undefined> { throw new Error('Secure credential custody unavailable'); }
 }
 /** Must provide durable, linearizable read-modify-write, including across workers.
  * Only encrypted credential envelopes live here; never app business state.
@@ -50,6 +52,7 @@ export class EncryptedProviderCustodian implements CredentialCustodian {
     if(!request || request.length>256) throw new Error('Invalid custody request');
     if(value.kind==='api-key' && (!/^[a-f0-9]{64}$/.test(value.verifier) || !/^[a-zA-Z0-9_]{1,12}$/.test(value.prefix))) throw new Error('Invalid API verifier/prefix');
     if(value.kind==='oidc-session' && (!value.material || value.material.length>65536)) throw new Error('Invalid session material');
+    if(value.kind==='github-oauth' && (!value.material || value.material.length>16384 || /[\x00-\x1F\x7F\r\n]/.test(value.material))) throw new Error('Invalid GitHub OAuth material');
     return this.transaction(scope, entries=> {
       const old=entries.find(e=>e.request===request);
       if(old) { if(!old.value || !equal(JSON.stringify(old.value),JSON.stringify(value))) throw new Error('Custody request conflict'); return old.ref; }
@@ -63,4 +66,5 @@ export class EncryptedProviderCustodian implements CredentialCustodian {
   }
   destroy(scope: string, ref: string) { return this.transaction(scope, entries=> { const entry=entries.find(e=>e.ref===ref); if(entry) { if(entry.value?.kind==='api-key') entry.retired=entry.value; entry.value=null; } }); }
   recoverSession(scope: string, ref: string) { return this.transaction(scope, entries=> { const value=entries.find(e=>e.ref===ref)?.value; return value?.kind==='oidc-session' ? value.material : undefined; }); }
+  recoverGithubToken(scope: string, ref: string) { return this.transaction(scope, entries=> { const value=entries.find(e=>e.ref===ref)?.value; return value?.kind==='github-oauth' ? value.material : undefined; }); }
 }
