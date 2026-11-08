@@ -1,0 +1,33 @@
+# Milestone 0B — Source-only protected pending-email stage
+
+`stageSealedPendingEmails` in `server/git-store/sealed-email-stage.mjs` accepts the complete sealed ten-table source, reviewed manifest, explicit scope, source encryption/HMAC keys, independently pinned receipt trust/head, and a distinct 32-byte destination mail key. It repeats full source authentication and relational/receipt trust validation before mapping any emails. It does not query SQL, append Git, deliver email, or expose a CLI or production migration path. Authentication and ownership rules are unchanged. The source table has no user/org ownership column; no owner is inferred from recipient content.
+
+For compatible records, all nine normalized SQL fields survive exactly: `id`, `to`, `subject`, `body_html`, `body_text`, `retry_count`, `next_retry_at`, `status`, `created_at`. Message fields use the existing `protectQueuedEmail` AES-256-GCM/HMAC API; scheduling fields retain their original values. Every protected record is verified and decrypted in memory and compared against every original field before returning. This proves normalized SQL projection continuity, not PostgreSQL disk bytes or original HTTP serialization. No recipient, subject or body plaintext is returned in the stage, summary or error. The complete sealed source must still be retained privately.
+
+The private stage contains source commitment, scope, and one insert transaction per email, sorted by numeric source ID. The aggregate summary includes row count, keyed source commitment, and `stageDigest`: HMAC-SHA256 under the destination mail key over UTF-8 `JSON.stringify(privateStage)`. This explicit import proof binds the complete scheduling state, ciphertext, transaction IDs, scope and source commitment. Custodians must retain the summary separately and compare that digest before any future append. It is not an independently signed receipt or proof of delivery. Git event signatures protect records once appended. Source keys and the destination mail key must be supplied from trusted private custody; this helper does not provision, back up or authenticate an external vault.
+
+Transaction IDs are deterministic for identical source commitment and scope. Encryption uses fresh random nonces, so ciphertext and stage digest change when regenerated. Persist the exact stage in authorized private durable custody before any append; retry those exact saved transactions. Regenerating then appending with the same ID conflicts. Neither durable journal persistence nor rollback/reconciliation is implemented here. All output is private, including ciphertext and scheduling metadata; never publish it to public Git, logs or external tools. Empty input returns an explicit empty stage and keyed proof.
+
+## Precise historical continuity blockers
+
+The existing signed store (`store.mjs`, `GitAppStateService.apply`) permits a new email only with `status: 'pending'` and `retryCount: 0`. Historical `sent`/`failed` rows and any nonzero attempt count cannot be inserted losslessly. The stage rejects the entire input if any row violates this rule, rather than resetting attempts, replaying fictitious transitions, or weakening signed replay. Historical retry/status continuity therefore remains blocked. A future reviewed historical import protocol would need explicit authenticated import authority and proof verification during replay; none is invented here.
+
+The protected-email schema accepts only `pending`, `sent`, `failed`, and requires non-null parseable string retry/creation timestamps. Existing sealed-source synthetic fixtures contain `status: 'queued'` and `next_retry_at: null`; those inputs are blocked. No `queued`→`pending` translation or timestamp default is lossless. Message fields must all be strings, with a nonempty recipient/subject and at least one nonempty body, no recipient/subject header newlines, and at most 512 KiB combined content. Null body values, unsupported statuses, invalid counts, timestamps, headers or sizes fail generically and return no partial stage. Original sealed records remain intact. These constraints describe actual target code, not a claim that every possible SQL row satisfies them.
+
+Both `productionGoAllowed` and `fullApplicationMigrationComplete` always remain false. Sessions, API-key continuity, provider continuity, durable custody, production export/cutover, and business-ready parity remain outside this contribution. No networked ledger attestation is created: the bounded task explicitly prohibits contacting a networked ledger.
+
+## Local synthetic validation
+
+- `node tests/sealed-email-stage.test.mjs`: 5/5 passed, including three nonempty protected records, all-field roundtrip, empty source, trust/material/source tamper failures, wrong decryption key/scope, explicit historical retry/status/null-field blockers, confidentiality, deterministic transaction IDs, randomized protection, saved-stage duplicate append and independent local signed Git mirror replay.
+- `node tests/full-state-sealed.test.mjs`: 15/15 passed.
+- `node tests/full-state-inventory.test.mjs`: 10/10 passed.
+- `node tests/sealed-migration-relations.test.mjs`: 7/7 passed.
+- `node tests/git-store.test.mjs`: 20/21 passed; existing migration CLI test fails with `Unexpected end of JSON input` at line 210. No existing store/CLI files were changed.
+- `npm run check`: exit 127, `tsc: command not found`; this worktree has no installed dependencies. `node --import tsx tests/sealed-core-stage.test.mjs` is also blocked by missing `tsx`. No packages were installed or changed.
+- The subprocess runner `node --test tests/sealed-email-stage.test.mjs` returned only a file-level `ERR_TEST_FAILURE`; direct execution through `node:test` produced the five passing results above. This runtime rejects `--test-isolation=none` as an unsupported option.
+
+All Git tests use disposable local synthetic bare repositories under the system temporary directory. No commit or push was made in the development worktree.
+
+## Independent continuation validation — 2026-11-08 UTC
+
+After Codex completed the isolated source-only change, the OCI operator reused the existing preinstalled dependency tree without changing the package manifest or lockfile, then independently verified the exact worktree: `node --test tests/sealed-email-stage.test.mjs` 5/5 PASS; `node --import tsx --test tests/*.test.mjs` 174/174 PASS; `npm run check` PASS; `npm run build` PASS; `git diff --check` PASS. The earlier Codex report about missing `tsc` and the isolated direct `git-store.test.mjs` failure reflected its incomplete test environment, not this subsequent full-suite validation. These checks remain synthetic/source-only and do not authorize production migration or release.
