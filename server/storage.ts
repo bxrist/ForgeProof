@@ -24,6 +24,7 @@ import {
   type Subscription,
   type PlanType,
 } from "@shared/schema";
+import { LIFEOS_SERVICE_ACCOUNT } from "./receiptAccess";
 import type { User } from "@shared/models/auth";
 import { db } from "./db";
 import { eq, desc, and, or, asc, sql } from "drizzle-orm";
@@ -40,7 +41,7 @@ export interface IStorage {
   updateRepositoryLastSynced(id: number): Promise<void>;
   deleteRepository(id: number): Promise<void>;
 
-  getAttestations(userId: string): Promise<AttestationReceipt[]>;
+  getAttestations(userId: string, includeLifeos?: boolean): Promise<AttestationReceipt[]>;
   getSystemAttestations(): Promise<AttestationReceipt[]>;
   getAllAttestationsOrdered(): Promise<AttestationReceipt[]>;
   getAttestation(id: number): Promise<AttestationReceipt | undefined>;
@@ -127,9 +128,9 @@ export class DatabaseStorage implements IStorage {
     await db.delete(repositories).where(eq(repositories.id, id));
   }
 
-  async getAttestations(userId: string): Promise<AttestationReceipt[]> {
+  async getAttestations(userId: string, includeLifeos?: boolean): Promise<AttestationReceipt[]> {
     return db.select().from(attestationReceipts)
-      .where(or(eq(attestationReceipts.userId, userId), eq(attestationReceipts.userId, "forgeproof-system")))
+      .where(or(eq(attestationReceipts.userId, userId), eq(attestationReceipts.userId, "forgeproof-system"), includeLifeos ? eq(attestationReceipts.userId, LIFEOS_SERVICE_ACCOUNT) : undefined))
       .orderBy(desc(attestationReceipts.createdAt));
   }
 

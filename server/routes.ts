@@ -1,3 +1,4 @@
+import { canReadLifeosReceipts, canReadDashboardReceipt, isLifeosReceipt } from "./receiptAccess";
 import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
 import rateLimit from "express-rate-limit";
@@ -249,21 +250,22 @@ export async function registerRoutes(
   app.get("/api/attestations", uiLimiter, isAuthenticated, async (req, res) => {
     const user = req.user as any;
     const userId = user.claims?.sub || user.id;
-    const attestations = await storage.getAttestations(userId);
-    res.json(attestations);
+    const attestations = await storage.getAttestations(userId, canReadLifeosReceipts(req));
+    res.json(attestations.filter((receipt) => canReadDashboardReceipt(req, receipt)));
   });
 
   app.get("/api/attestations/:id", uiLimiter, isAuthenticated, async (req, res) => {
     const id = parseInt(req.params.id as string);
     if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
-    const user = req.user as any;
-    const userId = user.claims?.sub || user.id;
     const attestation = await storage.getAttestation(id);
     if (!attestation) return res.status(404).json({ message: "Not found" });
-    if (attestation.userId !== userId && attestation.userId !== "forgeproof-system") {
-      return res.status(403).json({ message: "Forbidden" });
+    if (!canReadDashboardReceipt(req, attestation)) {
+      return isLifeosReceipt(attestation)
+        ? res.status(404).json({ message: "Not found" })
+        : res.status(403).json({ message: "Forbidden" });
     }
-    const childAttestations = await storage.getAttestationsByParentId(id);
+    const childAttestations = (await storage.getAttestationsByParentId(id))
+      .filter((child) => canReadDashboardReceipt(req, child));
     res.json({ ...attestation, childAttestations });
   });
 
