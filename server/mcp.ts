@@ -155,6 +155,7 @@ async function createMcpAttestation(
     prevEntryHash,
     entryHash,
     receiptVersion: "v1",
+    signedAt: timestamp,
     metadata: data.metadata || null,
     attestationType: data.attestation_type || "origin",
   });
@@ -232,6 +233,7 @@ async function handleAuditAttest(args: any, userId: string) {
     prevEntryHash,
     entryHash,
     receiptVersion: "v1",
+    signedAt: timestamp,
     metadata: { source: "mcp_audit" },
     attestationType: "security_audit",
     parentAttestationId: args.parentAttestationId,

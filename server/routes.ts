@@ -1,3 +1,5 @@
+import { registerRepositoryList, registerRepositoryDelete } from "./repositoryRoutes";
+import { registerStagingRepositoryRoutes, type StagingRouteOptions } from "./stagingRepositoryRoutes";
 import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
 import rateLimit from "express-rate-limit";
@@ -222,8 +224,13 @@ async function createAttestationReceipt(
 
 export async function registerRoutes(
   httpServer: Server,
-  app: Express
+  app: Express,
+  staging?: StagingRouteOptions
 ): Promise<Server> {
+  if (staging !== undefined) {
+    registerStagingRepositoryRoutes(app, staging);
+    return httpServer;
+  }
   await setupAuth(app);
 
   // ─── Auth ─────────────────────────────────────────
@@ -434,12 +441,7 @@ export async function registerRoutes(
   });
 
   // ─── GitHub Repositories ──────────────────────────
-  app.get("/api/repositories", uiLimiter, isAuthenticated, async (req, res) => {
-    const user = req.user as any;
-    const userId = user.claims?.sub || user.id;
-    const repos = await storage.getRepositories(userId);
-    res.json(repos);
-  });
+  registerRepositoryList(app, storage, uiLimiter, isAuthenticated);
 
   app.post("/api/repositories/sync", uiLimiter, isAuthenticated, async (req, res) => {
     try {
@@ -573,18 +575,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/repositories/:id", uiLimiter, isAuthenticated, async (req, res) => {
-    const id = parseInt(req.params.id as string);
-    if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
-    const user = req.user as any;
-    const userId = user.claims?.sub || user.id;
-    const repo = await storage.getRepository(id);
-    if (!repo) return res.status(404).json({ message: "Not found" });
-    if (repo.userId !== userId) return res.status(403).json({ message: "Forbidden" });
-    await storage.deleteRepository(id);
-    await storage.createAuditLog({ userId, action: "repository.deleted", resourceType: "repository", resourceId: String(req.params.id) });
-    res.json({ message: "Repository removed" });
-  });
+  registerRepositoryDelete(app, storage, uiLimiter, isAuthenticated);
 
   // ─── GitHub OAuth ──────────────────────────────────
   const oauthStates = new Map<string, number>();
