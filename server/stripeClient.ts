@@ -1,7 +1,38 @@
 import Stripe from 'stripe';
-import { StripeSync } from 'stripe-replit-sync';
+import type { StripeSync } from 'stripe-replit-sync';
+import { EXPECTED_STRIPE_ACCOUNT_ID, STRIPE_LIVE_MODE } from "./stripeConfig";
 
-async function getStripeCredentials(): Promise<{ secretKey: string; webhookSecret?: string }> {
+export async function getStripeCredentials(): Promise<{
+  secretKey: string;
+  webhookSecret?: string;
+  webhookSecretUrl?: string;
+  webhookSecretAccountId?: string;
+}> {
+  if (STRIPE_LIVE_MODE) {
+    const secretKey = process.env.FORGEPROOF_LIVE_STRIPE_SECRET_KEY?.trim();
+    if (!secretKey) throw new Error("Missing ForgeProof live Stripe credential");
+    return {
+      secretKey,
+      webhookSecret: process.env.FORGEPROOF_LIVE_STRIPE_WEBHOOK_SECRET,
+      webhookSecretUrl: process.env.FORGEPROOF_LIVE_STRIPE_WEBHOOK_URL,
+      webhookSecretAccountId: EXPECTED_STRIPE_ACCOUNT_ID,
+    };
+  }
+  // An explicitly supplied independent key takes precedence. Never fall back
+  // to a different connector/account if that key is empty, invalid or rejected.
+  if (process.env.STRIPE_SECRET_KEY !== undefined) {
+    const secretKey = process.env.STRIPE_SECRET_KEY.trim();
+    if (!secretKey) {
+      throw new Error("STRIPE_SECRET_KEY is configured but empty");
+    }
+    return {
+      secretKey,
+      webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+      webhookSecretUrl: process.env.FORGEPROOF_STRIPE_WEBHOOK_URL,
+      webhookSecretAccountId: process.env.FORGEPROOF_STRIPE_WEBHOOK_ACCOUNT_ID,
+    };
+  }
+
   const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
   const xReplitToken = process.env.REPL_IDENTITY
     ? "repl " + process.env.REPL_IDENTITY
@@ -42,12 +73,30 @@ async function getStripeCredentials(): Promise<{ secretKey: string; webhookSecre
   return {
     secretKey,
     webhookSecret: settings.webhook_secret,
+    // A connector secret is usable only when an operator explicitly binds it
+    // to this deployment's exact webhook URL.  The connector does not expose
+    // that ownership relationship on its own.
+    webhookSecretUrl: process.env.FORGEPROOF_STRIPE_CONNECTOR_WEBHOOK_URL,
+    webhookSecretAccountId: process.env.FORGEPROOF_STRIPE_CONNECTOR_WEBHOOK_ACCOUNT_ID,
   };
 }
 
-export async function getUncachableStripeClient(): Promise<Stripe> {
+async function assertExpectedStripeAccount(stripe: Stripe): Promise<void> {
+  const account = await (stripe.accounts.retrieve as any)();
+  if (account.id !== EXPECTED_STRIPE_ACCOUNT_ID) {
+    throw new Error("Stripe account identity mismatch");
+  }
+  const balance = await stripe.balance.retrieve();
+  if (balance.livemode !== STRIPE_LIVE_MODE) throw new Error("Stripe mode mismatch");
+}
+
+export async function getUncachableStripeClient(options?: { skipAccountGuard?: boolean }): Promise<Stripe> {
   const { secretKey } = await getStripeCredentials();
-  return new Stripe(secretKey);
+  const stripe = new Stripe(secretKey);
+  if (!options?.skipAccountGuard) {
+    await assertExpectedStripeAccount(stripe);
+  }
+  return stripe;
 }
 
 export async function getStripeSync(): Promise<StripeSync> {
@@ -57,9 +106,16 @@ export async function getStripeSync(): Promise<StripeSync> {
   }
 
   const { secretKey, webhookSecret } = await getStripeCredentials();
-  return new StripeSync({
+  const { StripeSync } = await import('stripe-replit-sync');
+  const sync = new StripeSync({
     poolConfig: { connectionString: databaseUrl },
     stripeSecretKey: secretKey,
     stripeWebhookSecret: webhookSecret ?? '',
+    stripeAccountId: EXPECTED_STRIPE_ACCOUNT_ID,
   });
+  // StripeSync has mutating catalog/webhook methods.  Verify the provider
+  // identity before returning it so a connector switch cannot write to a
+  // different account.
+  await assertExpectedStripeAccount(sync.stripe as Stripe);
+  return sync;
 }

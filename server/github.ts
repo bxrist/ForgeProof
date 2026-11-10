@@ -139,10 +139,13 @@ export async function commitAttestationToGit(
   entryHash: string,
   receiptJson: string,
   modelProvider: string,
-  modelName: string
+  modelName: string,
+  customCommitMessage?: string
 ): Promise<{ commitUrl: string; commitMessage: string }> {
   const filePath = `.forgeproof/receipts/${entryHash}.json`;
-  const commitMessage = `chore: ForgeProof attestation ${entryHash.slice(0, 8)} — ${modelProvider}/${modelName}`;
+  const commitMessage = customCommitMessage?.trim()
+    ? customCommitMessage.trim()
+    : `chore: ForgeProof attestation ${entryHash.slice(0, 8)} — ${modelProvider}/${modelName}`;
   const contentBase64 = Buffer.from(receiptJson, "utf-8").toString("base64");
 
   const apiBase = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`;

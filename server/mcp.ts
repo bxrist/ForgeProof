@@ -1,5 +1,22 @@
 import { storage } from "./storage";
-import { sha256, signData, getKeyPair, computeEntryHash, verifySignature, getReceiptSigningTimestamp } from "./crypto";
+import { sha256, signData, getKeyPair, computeEntryHash, verifySignature } from "./crypto";
+import { getReceiptTimestamp, isReceiptIdQuery } from "./receiptTimestamp";
+import { currentApplicationStorage } from "./storageBackend";
+import type { GitStorage } from "./git-store/storage";
+import type { InsertAttestationReceipt } from "@shared/schema";
+import { randomUUID } from "node:crypto";
+
+async function persistMcpReceipt(data: InsertAttestationReceipt) {
+  const git = currentApplicationStorage() as GitStorage | undefined;
+  if (!git) return storage.createAttestation(data);
+  // Only new issuance: the CAS transaction chooses the current predecessor and
+  // signs atomically with its quota update. Historical signatures are untouched.
+  const {signature, publicKey, entryHash, prevEntryHash, ...source} = data;
+  return git.issueAttestationWithSigner(source, {
+    publicKey: getKeyPair().publicKey,
+    sign: async input => signData(input.toString("utf8")),
+  }, randomUUID());
+}
 
 export const mcpToolDefinitions = [
   {
@@ -139,7 +156,7 @@ async function createMcpAttestation(
   const signature = signData(signaturePayload);
   const { publicKey } = getKeyPair();
 
-  return storage.createAttestation({
+  return persistMcpReceipt({
     userId,
     repositoryId: null,
     fileHash: data.file_hash,
@@ -155,6 +172,7 @@ async function createMcpAttestation(
     prevEntryHash,
     entryHash,
     receiptVersion: "v1",
+    signedAt: timestamp,
     metadata: data.metadata || null,
     attestationType: data.attestation_type || "origin",
   });
@@ -188,7 +206,7 @@ async function handleAttest(args: any, userId: string) {
 
 async function handleAuditAttest(args: any, userId: string) {
   const parent = await storage.getAttestation(args.parentAttestationId);
-  if (!parent) {
+  if (!parent || parent.userId !== userId) {
     return { error: "Parent attestation not found" };
   }
 
@@ -216,7 +234,7 @@ async function handleAuditAttest(args: any, userId: string) {
   const signature = signData(signaturePayload);
   const { publicKey } = getKeyPair();
 
-  const receipt = await storage.createAttestation({
+  const receipt = await persistMcpReceipt({
     userId,
     repositoryId: null,
     fileHash,
@@ -232,6 +250,7 @@ async function handleAuditAttest(args: any, userId: string) {
     prevEntryHash,
     entryHash,
     receiptVersion: "v1",
+    signedAt: timestamp,
     metadata: { source: "mcp_audit" },
     attestationType: "security_audit",
     parentAttestationId: args.parentAttestationId,
@@ -260,8 +279,8 @@ async function handleLookup(args: any) {
   const query = args.query;
   let entry: any = null;
 
-  const idNum = parseInt(query);
-  if (!isNaN(idNum)) {
+  if (typeof query === "string" && isReceiptIdQuery(query)) {
+    const idNum = Number(query);
     entry = await storage.getAttestation(idNum);
   }
 
@@ -273,7 +292,7 @@ async function handleLookup(args: any) {
     return { found: false, message: "No attestation found for the given ID or hash" };
   }
 
-  const timestamp = getReceiptSigningTimestamp(entry);
+  const timestamp = getReceiptTimestamp(entry) || "";
   const recomputedHash = computeEntryHash({
     fileHash: entry.fileHash,
     modelName: entry.modelName,
@@ -284,7 +303,7 @@ async function handleLookup(args: any) {
   });
 
   const signaturePayload = `${entry.entryHash}|${entry.fileHash}|${timestamp}`;
-  const signatureValid = verifySignature(signaturePayload, entry.signature, entry.publicKey);
+  const signatureValid = !!timestamp && verifySignature(signaturePayload, entry.signature, entry.publicKey);
 
   return {
     found: true,
@@ -301,7 +320,7 @@ async function handleLookup(args: any) {
     signature_valid: signatureValid,
     hash_match: !!timestamp && recomputedHash === entry.entryHash,
     created_at: entry.createdAt,
-    signed_at: entry.signedAt,
+    signed_at: entry.signedAt ?? null,
   };
 }
 
@@ -314,7 +333,7 @@ async function handleVerifyChain() {
   for (const entry of allAttestations) {
     const chainValid = entry.prevEntryHash === prevHash;
 
-    const timestamp = getReceiptSigningTimestamp(entry);
+    const timestamp = getReceiptTimestamp(entry) || "";
     const recomputedHash = computeEntryHash({
       fileHash: entry.fileHash,
       modelName: entry.modelName,

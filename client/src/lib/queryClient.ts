@@ -1,9 +1,15 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
+export class ApiError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+  }
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+    throw new ApiError(res.status, `${res.status}: ${text}`);
   }
 }
 
@@ -12,16 +18,9 @@ export async function apiRequest(
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
-  const headers: Record<string, string> = data ? { "Content-Type": "application/json" } : {};
-  if (!["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) {
-    const tokenResponse = await fetch("/api/csrf-token", { credentials: "include", cache: "no-store" });
-    await throwIfResNotOk(tokenResponse);
-    const { csrfToken } = await tokenResponse.json();
-    headers["X-CSRF-Token"] = csrfToken;
-  }
   const res = await fetch(url, {
     method,
-    headers,
+    headers: data ? { "Content-Type": "application/json" } : {},
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
   });

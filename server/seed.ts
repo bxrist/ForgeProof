@@ -3,6 +3,7 @@ import { attestationReceipts } from "@shared/schema";
 import { sha256, signData, getKeyPair, computeEntryHash } from "./crypto";
 import { storage } from "./storage";
 import { sql } from "drizzle-orm";
+import { gitLedgerEnabled } from "./gitLedger";
 
 const SEED_USER_ID = "forgeproof-system";
 
@@ -62,6 +63,8 @@ const seedFiles = [
 ];
 
 export async function seedDatabase() {
+  // An activated archive must never receive synthetic startup receipts.
+  if (gitLedgerEnabled()) return;
   const existing = await db.select({ count: sql<number>`count(*)` }).from(attestationReceipts);
   const existingCount = Number(existing[0].count);
 
@@ -79,22 +82,52 @@ export async function seedDatabase() {
       if (multiModelCount > 0 && openAICount > 0) {
         const missingGitUrls = await db.select({ count: sql<number>`count(*)` }).from(attestationReceipts).where(sql`git_commit_url IS NULL AND user_id = 'forgeproof-system'`);
         const missingCount = Number(missingGitUrls[0].count);
-        if (missingCount === 0) {
-          const hasRealUrls = await db.select({ count: sql<number>`count(*)` }).from(attestationReceipts).where(sql`git_commit_url LIKE '%cc3552fee89725d3a2c0602259ac79cba7769f14%' AND user_id = 'forgeproof-system'`);
-          const realUrlCount = Number(hasRealUrls[0].count);
-          if (realUrlCount > 0) {
-            const missingCommitMessages = await db.select({ count: sql<number>`count(*)` }).from(attestationReceipts).where(sql`git_commit_message IS NULL AND user_id = 'forgeproof-system'`);
-            const missingMsgCount = Number(missingCommitMessages[0].count);
-            if (missingMsgCount === 0) {
-              console.log("Seed data already exists with commit messages, skipping...");
-              return;
-            }
-            console.log(`Seed data missing commit messages (${missingMsgCount} entries). Clearing and re-seeding...`);
-            await db.delete(attestationReceipts).where(sql`user_id = 'forgeproof-system'`);
+        const hasRealUrls = await db.select({ count: sql<number>`count(*)` }).from(attestationReceipts).where(sql`git_commit_url LIKE '%cc3552fee89725d3a2c0602259ac79cba7769f14%' AND user_id = 'forgeproof-system'`);
+        const realUrlCount = Number(hasRealUrls[0].count);
+        const missingCommitMessages = await db.select({ count: sql<number>`count(*)` }).from(attestationReceipts).where(sql`git_commit_message IS NULL AND user_id = 'forgeproof-system'`);
+        const missingMsgCount = Number(missingCommitMessages[0].count);
+        const hasLegacyLineage = await db.execute(sql`
+          SELECT count(*) AS count FROM attestation_receipts r
+          JOIN attestation_receipts o ON r.parent_attestation_id = o.id
+          WHERE r.user_id = 'forgeproof-system' AND r.model_name = 'GPT-5' AND r.attestation_type = 'refactor'
+            AND o.model_name = 'GPT-4' AND o.user_id = 'forgeproof-system'
+            AND o.git_commit_url LIKE '%5471de789d8f014d19aa5bca2a397d491bd2cc30%'
+        `);
+        const legacyCount = Number((hasLegacyLineage as any).rows?.[0]?.count ?? (hasLegacyLineage as any)[0]?.count ?? 0);
+
+        if (missingCount === 0 && realUrlCount > 0 && missingMsgCount === 0 && legacyCount > 0) {
+          // Guard: verify no stale model names remain. The expected set is exactly:
+          //   GPT-5, Replit Agent 3, claude-sonnet-5 (current names), plus GPT-4
+          //   which is kept intentionally for the legacy-lineage demonstration row.
+          const staleModels = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(attestationReceipts)
+            .where(
+              sql`user_id = 'forgeproof-system'
+                  AND model_name NOT IN ('GPT-5', 'Replit Agent 3', 'claude-sonnet-5', 'GPT-4')`
+            );
+          const staleModelCount = Number(staleModels[0].count);
+          if (staleModelCount > 0) {
+            console.log(
+              `Seed data has ${staleModelCount} row(s) with stale model names. Clearing and re-seeding...`
+            );
+            await db
+              .delete(attestationReceipts)
+              .where(sql`user_id = 'forgeproof-system'`);
+            // Fall through to re-seed below.
+          } else {
+            console.log("Seed data already exists and is complete, skipping...");
+            return;
           }
-          console.log("Seed data has placeholder git commit URLs. Clearing and re-seeding with real URLs...");
-        } else {
+        }
+        if (missingCount > 0) {
           console.log(`Seed data has ${missingCount} entries missing git commit URLs. Clearing and re-seeding...`);
+        } else if (realUrlCount === 0) {
+          console.log("Seed data has placeholder git commit URLs. Clearing and re-seeding with real URLs...");
+        } else if (missingMsgCount > 0) {
+          console.log(`Seed data missing commit messages (${missingMsgCount} entries). Clearing and re-seeding...`);
+        } else {
+          console.log("Seed data missing legacy-model lineage example. Clearing and re-seeding...");
         }
         await db.delete(attestationReceipts).where(sql`user_id = 'forgeproof-system'`);
       } else {
@@ -164,7 +197,7 @@ export async function seedDatabase() {
     const timestamp = new Date().toISOString();
     const entryHash = computeEntryHash({
       fileHash: cryptoOrigin.fileHash,
-      modelName: "claude-3.5-sonnet",
+      modelName: "claude-sonnet-5",
       modelProvider: "Anthropic",
       countryOfOrigin: "US",
       prevEntryHash,
@@ -178,7 +211,7 @@ export async function seedDatabase() {
       fileHash: cryptoOrigin.fileHash,
       fileName: cryptoOrigin.fileName,
       filePath: cryptoOrigin.filePath,
-      modelName: "claude-3.5-sonnet",
+      modelName: "claude-sonnet-5",
       modelProvider: "Anthropic",
       countryOfOrigin: "US",
       attestationType: "security_audit",
@@ -193,7 +226,7 @@ export async function seedDatabase() {
       signedAt: timestamp,
       gitCommitUrl: `${GITHUB_REPO}53a268098939b9744903a608ea585fa30d1708bc`,
       gitCommitMessage: "Anthropic audit: crypto module passes all security checks",
-      metadata: { purpose: "Multi-model security audit of crypto module", auditor: "claude-3.5-sonnet" },
+      metadata: { purpose: "Multi-model security audit of crypto module", auditor: "claude-sonnet-5" },
     });
     prevEntryHash = entryHash;
   }
@@ -280,7 +313,7 @@ export async function seedDatabase() {
     const timestamp = new Date().toISOString();
     const entryHash = computeEntryHash({
       fileHash: routesOrigin.fileHash,
-      modelName: "claude-3.5-sonnet",
+      modelName: "claude-sonnet-5",
       modelProvider: "Anthropic",
       countryOfOrigin: "US",
       prevEntryHash,
@@ -294,7 +327,7 @@ export async function seedDatabase() {
       fileHash: routesOrigin.fileHash,
       fileName: routesOrigin.fileName,
       filePath: routesOrigin.filePath,
-      modelName: "claude-3.5-sonnet",
+      modelName: "claude-sonnet-5",
       modelProvider: "Anthropic",
       countryOfOrigin: "US",
       attestationType: "security_audit",
@@ -309,7 +342,7 @@ export async function seedDatabase() {
       signedAt: timestamp,
       gitCommitUrl: `${GITHUB_REPO}b743e220061e6bd9271bc9d69587d61b11a77362`,
       gitCommitMessage: "Claude audit: flag SQL injection risk in dynamic query construction",
-      metadata: { purpose: "Multi-model security audit of routes module", auditor: "claude-3.5-sonnet" },
+      metadata: { purpose: "Multi-model security audit of routes module", auditor: "claude-sonnet-5" },
     }).returning();
     flaggedAuditId = flaggedAudit.id;
     prevEntryHash = entryHash;
@@ -321,7 +354,7 @@ export async function seedDatabase() {
     const timestamp = new Date().toISOString();
     const entryHash = computeEntryHash({
       fileHash: remediatedFileHash,
-      modelName: "claude-3.5-sonnet",
+      modelName: "claude-sonnet-5",
       modelProvider: "Anthropic",
       countryOfOrigin: "US",
       prevEntryHash,
@@ -335,7 +368,7 @@ export async function seedDatabase() {
       fileHash: remediatedFileHash,
       fileName: routesOrigin.fileName,
       filePath: routesOrigin.filePath,
-      modelName: "claude-3.5-sonnet",
+      modelName: "claude-sonnet-5",
       modelProvider: "Anthropic",
       countryOfOrigin: "US",
       attestationType: "security_audit",
@@ -350,10 +383,88 @@ export async function seedDatabase() {
       signedAt: timestamp,
       gitCommitUrl: `${GITHUB_REPO}14e6c786be3188764941b8b78c9b4554d6972495`,
       gitCommitMessage: "Fix SQL injection: refactor to parameterized queries",
-      metadata: { purpose: "Remediation of flagged security issue in routes module", auditor: "claude-3.5-sonnet" },
+      metadata: { purpose: "Remediation of flagged security issue in routes module", auditor: "claude-sonnet-5" },
     });
     prevEntryHash = entryHash;
   }
 
   console.log("Seeded 3 multi-model attestation examples (secure audit, flagged audit, remediation).");
+
+  // 4. Legacy-model lineage on github.ts: Origin (GPT-4, 2024-era) → Refactor (GPT-5)
+  // Demonstrates that older receipts permanently keep the model that actually wrote the code.
+  let legacyOriginId: number;
+  const legacyFileHash = sha256("ForgeProof self-attestation: server/github.ts");
+  {
+    const timestamp = new Date().toISOString();
+    const entryHash = computeEntryHash({
+      fileHash: legacyFileHash,
+      modelName: "GPT-4",
+      modelProvider: "OpenAI",
+      countryOfOrigin: "US",
+      prevEntryHash,
+      timestamp,
+    });
+    const signaturePayload = `${entryHash}|${legacyFileHash}|${timestamp}`;
+    const signature = signData(signaturePayload);
+
+    const [legacyOrigin] = await db.insert(attestationReceipts).values({
+      userId: SEED_USER_ID,
+      fileHash: legacyFileHash,
+      fileName: "github.ts",
+      filePath: "server/github.ts",
+      modelName: "GPT-4",
+      modelProvider: "OpenAI",
+      countryOfOrigin: "US",
+      signature,
+      publicKey,
+      prevEntryHash,
+      entryHash,
+      receiptVersion: "v1",
+      signedAt: timestamp,
+      gitCommitUrl: `${GITHUB_REPO}5471de789d8f014d19aa5bca2a397d491bd2cc30`,
+      gitCommitMessage: "Add GitHub API client for repo sync and file fetching",
+      metadata: { purpose: "GitHub integration module — original implementation under a legacy model", self_attested: true },
+    }).returning();
+    legacyOriginId = legacyOrigin.id;
+    prevEntryHash = entryHash;
+  }
+
+  {
+    const refactoredFileHash = sha256("ForgeProof self-attestation: server/github.ts (refactored)");
+    const timestamp = new Date().toISOString();
+    const entryHash = computeEntryHash({
+      fileHash: refactoredFileHash,
+      modelName: "GPT-5",
+      modelProvider: "OpenAI",
+      countryOfOrigin: "US",
+      prevEntryHash,
+      timestamp,
+    });
+    const signaturePayload = `${entryHash}|${refactoredFileHash}|${timestamp}`;
+    const signature = signData(signaturePayload);
+
+    await db.insert(attestationReceipts).values({
+      userId: SEED_USER_ID,
+      fileHash: refactoredFileHash,
+      fileName: "github.ts",
+      filePath: "server/github.ts",
+      modelName: "GPT-5",
+      modelProvider: "OpenAI",
+      countryOfOrigin: "US",
+      attestationType: "refactor",
+      parentAttestationId: legacyOriginId,
+      signature,
+      publicKey,
+      prevEntryHash,
+      entryHash,
+      receiptVersion: "v1",
+      signedAt: timestamp,
+      gitCommitUrl: `${GITHUB_REPO}14e6c786be3188764941b8b78c9b4554d6972495`,
+      gitCommitMessage: "Refactor GitHub client: retries, pagination, and typed responses",
+      metadata: { purpose: "Modernization of GitHub client — original GPT-4 receipt preserved in lineage", self_attested: true },
+    });
+    prevEntryHash = entryHash;
+  }
+
+  console.log("Seeded legacy-model lineage example (GPT-4 origin → GPT-5 refactor on server/github.ts).");
 }

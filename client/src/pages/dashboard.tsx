@@ -1,7 +1,7 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useAuth } from "@/hooks/use-auth";
+import { useUser, useClerk, useAuth } from "@clerk/react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,8 +15,10 @@ import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { trackEvent } from "@/lib/analytics";
 import type { AttestationReceipt, Repository, ApiKey, Organization, AuditLog } from "@shared/schema";
 import { ForgeProofLogo } from "@/components/ForgeProofLogo";
 import { useTheme } from "@/components/ThemeProvider";
@@ -57,6 +59,39 @@ import {
 } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { SEO } from "@/components/SEO";
+import { HistoricalInventory } from "@/components/HistoricalInventory";
+import { RuntimeVerificationChecklist } from "@/components/RuntimeVerificationChecklist";
+import { ReceiptClaims } from "@/components/ReceiptClaims";
+import { useAppPrincipal } from "@/hooks/use-provenance";
+import { StripeReadinessLink } from "@/components/StripeReadinessLink";
+import { logicalReceiptKey, redactMetadata } from "@/lib/provenance";
+import { declarationSummary } from "@shared/receiptPresentation";
+import { GitHubAppPanel } from "@/components/GitHubAppPanel";
+
+type AttestationWithLedgerStatus = AttestationReceipt & {
+  gitLedgerStatus?: "not_configured" | "historical_boundary" | "in_git" | "pending" | "blocked" | "not_anchored";
+};
+
+function getGitLedgerStatusBadge(status: AttestationWithLedgerStatus["gitLedgerStatus"]) {
+  const styles: Record<NonNullable<AttestationWithLedgerStatus["gitLedgerStatus"]>, { label: string; className: string }> = {
+    not_configured: { label: "Ledger sync not enabled", className: "text-muted-foreground" },
+    historical_boundary: { label: "Before ledger activation", className: "text-muted-foreground" },
+    in_git: { label: "Git ledger", className: "text-green-600 dark:text-green-400 border-green-200 dark:border-green-800" },
+    pending: { label: "Git sync pending", className: "text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800" },
+    blocked: { label: "Git sync blocked", className: "text-red-600 dark:text-red-400 border-red-200 dark:border-red-800" },
+    not_anchored: { label: "Not Git-anchored", className: "text-muted-foreground" },
+  };
+  const value = styles[status || "not_configured"];
+  return (
+    <Badge
+      variant="outline"
+      className={`text-xs shrink-0 ${value.className}`}
+      data-testid={`badge-ledger-status-${status || "not_configured"}`}
+    >
+      {value.label}
+    </Badge>
+  );
+}
 
 function formatRelativeTime(date: Date | string | null | undefined): string {
   if (!date) return "";
@@ -139,12 +174,14 @@ function AttestationRow({
   isCommitting,
   hasGitFailure,
   targetRepoName,
+  modelCount,
 }: {
-  receipt: AttestationReceipt;
+  receipt: AttestationWithLedgerStatus;
   onCommitToGit?: (id: number) => void;
   isCommitting?: boolean;
   hasGitFailure?: boolean;
   targetRepoName?: string;
+  modelCount?: number;
 }) {
   const [, navigate] = useLocation();
   return (
@@ -159,24 +196,51 @@ function AttestationRow({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium text-sm truncate">{receipt.fileName}</span>
+          <span className="text-xs text-muted-foreground">Receipt #{receipt.id} · Issuer {receipt.userId}</span>
           {getAttestationTypeBadge(receipt.attestationType)}
+          {getGitLedgerStatusBadge(receipt.gitLedgerStatus)}
           {receipt.parentAttestationId && (
             <Link2 className="w-3 h-3 text-muted-foreground shrink-0" data-testid={`icon-parent-link-${receipt.id}`} />
           )}
+          {modelCount !== undefined && modelCount > 1 && (
+            <Badge
+              variant="outline"
+              className="text-xs text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-700 shrink-0"
+              title={`${modelCount} distinct declared model labels for this logical file — not a count of actual AI authors`}
+              data-testid={`badge-model-count-${receipt.id}`}
+            >
+              <Cpu className="w-3 h-3 mr-0.5" />
+              {modelCount} distinct declared model labels
+            </Badge>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-muted-foreground truncate">{receipt.filePath}</span>
+          {receipt.gitCommitMessage ? (
+            <span
+              className="text-xs text-muted-foreground truncate italic"
+              title={receipt.gitCommitMessage}
+              data-testid={`text-commit-message-${receipt.id}`}
+            >
+              {receipt.gitCommitMessage}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground truncate">{receipt.filePath}</span>
+          )}
           {getAuditVerdictDisplay(receipt.auditVerdict)}
         </div>
+        <details className="mt-2" onClick={event => event.stopPropagation()}>
+          <summary className="text-xs text-muted-foreground cursor-pointer">Signed declarations and observations</summary>
+          <div className="mt-2"><ReceiptClaims receipt={receipt} /></div>
+        </details>
       </div>
       <div className="hidden sm:flex items-center gap-2">
         <Badge variant="secondary" className="text-xs">
           <Cpu className="w-3 h-3 mr-1" />
-          {receipt.modelProvider}
+          Declared: {receipt.modelProvider}
         </Badge>
         <Badge variant="outline" className="text-xs">
           <MapPin className="w-3 h-3 mr-1" />
-          {receipt.countryOfOrigin}
+          Claimed country: {receipt.countryOfOrigin}
         </Badge>
       </div>
       <div className="hidden md:block text-xs text-muted-foreground whitespace-nowrap">
@@ -193,7 +257,7 @@ function AttestationRow({
         >
           <Badge variant="secondary" className="text-xs gap-1 text-green-600 dark:text-green-400 border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/40 hover:bg-green-100 dark:hover:bg-green-900/40 cursor-pointer shrink-0">
             <SiGithub className="w-3 h-3" />
-            In Git
+            Receipt export
           </Badge>
         </a>
       ) : hasGitFailure ? (
@@ -203,21 +267,32 @@ function AttestationRow({
           data-testid={`badge-git-failed-${receipt.id}`}
         >
           {onCommitToGit ? (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="shrink-0 text-yellow-600 dark:text-yellow-400 hover:text-yellow-700 dark:hover:text-yellow-300"
-              title="Git commit failed — click to retry"
-              disabled={isCommitting}
-              onClick={(e) => { e.stopPropagation(); onCommitToGit(receipt.id); }}
-              data-testid={`button-commit-git-${receipt.id}`}
-            >
-              {isCommitting ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <AlertTriangle className="w-4 h-4" />
+            <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+              {targetRepoName && (
+                <span
+                  className="hidden sm:flex items-center gap-0.5 text-xs text-muted-foreground/70 whitespace-nowrap"
+                  data-testid={`label-commit-target-${receipt.id}`}
+                >
+                  <ArrowRight className="w-3 h-3" />
+                  {targetRepoName}
+                </span>
               )}
-            </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="shrink-0 text-yellow-600 dark:text-yellow-400 hover:text-yellow-700 dark:hover:text-yellow-300"
+                title={targetRepoName ? `Git commit failed — click to retry (${targetRepoName})` : "Git commit failed — click to retry"}
+                disabled={isCommitting}
+                onClick={() => onCommitToGit(receipt.id)}
+                data-testid={`button-commit-git-${receipt.id}`}
+              >
+                {isCommitting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4" />
+                )}
+              </Button>
+            </span>
           ) : (
             <Badge variant="outline" className="text-xs gap-1 text-yellow-600 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800">
               <AlertTriangle className="w-3 h-3" />
@@ -253,6 +328,7 @@ function AttestationRow({
           </Button>
         </div>
       )}
+      {!receipt.gitCommitUrl && <span className="text-xs text-muted-foreground">Optional receipt archive absent</span>}
       <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
     </div>
   );
@@ -332,6 +408,7 @@ function CreateApiKeyDialog() {
     onSuccess: (data) => {
       setGeneratedKey(data.fullKey);
       queryClient.invalidateQueries({ queryKey: ["/api/api-keys"] });
+      trackEvent("api_key_created", { location: "dashboard" });
       toast({ title: "API key created successfully" });
     },
     onError: () => {
@@ -551,7 +628,7 @@ function GitHubRepoSyncPanel() {
   const fetchGhRepos = async () => {
     setLoadingRepos(true);
     try {
-      const res = await fetch("/api/github/repos", { credentials: "include" });
+      const res = await apiRequest("GET", "/api/github/repos");
       if (!res.ok) throw new Error("Failed to fetch");
       const data = await res.json();
       setGhRepos(data);
@@ -577,6 +654,7 @@ function GitHubRepoSyncPanel() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/repositories"] });
+      trackEvent("repository_added", { source: "github", location: "dashboard" });
       toast({ title: "Repository added" });
     },
     onError: () => {
@@ -639,7 +717,7 @@ function GitHubRepoSyncPanel() {
 
 function NotificationPreferences() {
   const { toast } = useToast();
-  const { data: prefs, isLoading } = useQuery<{ notificationEmail: string | null }>({
+  const { data: prefs, isLoading } = useQuery<{ notificationEmail: string | null; notifyOnGitFailure: boolean }>({
     queryKey: ["/api/notifications/preferences"],
   });
   const [email, setEmail] = useState("");
@@ -653,8 +731,8 @@ function NotificationPreferences() {
   }, [prefs, initialized]);
 
   const saveMutation = useMutation({
-    mutationFn: async (notificationEmail: string) => {
-      await apiRequest("POST", "/api/notifications/preferences", { notificationEmail });
+    mutationFn: async (data: { notificationEmail?: string; notifyOnGitFailure?: boolean }) => {
+      await apiRequest("POST", "/api/notifications/preferences", data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/notifications/preferences"] });
@@ -689,7 +767,7 @@ function NotificationPreferences() {
             onChange={(e) => setEmail(e.target.value)}
             onBlur={() => {
               if (email !== (prefs?.notificationEmail || "")) {
-                saveMutation.mutate(email);
+                saveMutation.mutate({ notificationEmail: email });
               }
             }}
             data-testid="input-notification-email"
@@ -697,13 +775,25 @@ function NotificationPreferences() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => saveMutation.mutate(email)}
+            onClick={() => saveMutation.mutate({ notificationEmail: email })}
             disabled={saveMutation.isPending}
             data-testid="button-save-notification-email"
           >
             <Save className="w-3.5 h-3.5 mr-1.5" />
             Save
           </Button>
+        </div>
+        <div className="flex items-center justify-between gap-2 mt-4">
+          <div>
+            <div className="text-sm font-medium">Git commit failures</div>
+            <div className="text-xs text-muted-foreground">Email me when an attestation fails to commit to GitHub</div>
+          </div>
+          <Switch
+            checked={prefs?.notifyOnGitFailure ?? true}
+            onCheckedChange={(checked) => saveMutation.mutate({ notifyOnGitFailure: checked })}
+            disabled={saveMutation.isPending}
+            data-testid="switch-notify-git-failure"
+          />
         </div>
       </div>
     </Card>
@@ -809,7 +899,7 @@ function UpgradePlanCard({
 function BillingTab({ apiKeyCount }: { apiKeyCount: number }) {
   const { toast } = useToast();
 
-  const { data: subscription, isLoading } = useQuery<Subscription>({
+  const { data: subscription, isLoading, isError, refetch } = useQuery<Subscription>({
     queryKey: ["/api/billing/subscription"],
   });
 
@@ -817,6 +907,7 @@ function BillingTab({ apiKeyCount }: { apiKeyCount: number }) {
     const params = new URLSearchParams(window.location.search);
     const billing = params.get("billing");
     if (billing === "success") {
+      trackEvent("subscription_activated", { source: "stripe_checkout" });
       toast({ title: "Subscription activated — welcome aboard!" });
       queryClient.invalidateQueries({ queryKey: ["/api/billing/subscription"] });
       params.delete("billing");
@@ -835,7 +926,8 @@ function BillingTab({ apiKeyCount }: { apiKeyCount: number }) {
       const res = await apiRequest("POST", "/api/billing/checkout", { plan });
       return res.json() as Promise<{ url: string }>;
     },
-    onSuccess: (data) => {
+    onSuccess: (data, plan) => {
+      trackEvent("checkout_started", { plan, location: "dashboard" });
       if (data.url) window.location.href = data.url;
     },
     onError: (error: Error) => {
@@ -882,8 +974,18 @@ function BillingTab({ apiKeyCount }: { apiKeyCount: number }) {
     );
   }
 
-  const plan = subscription?.plan ?? "free";
-  const status = subscription?.status ?? "active";
+  if (isError || !subscription) {
+    return (
+      <Card className="p-5 space-y-3">
+        <h3 className="font-semibold text-sm">Billing status unknown</h3>
+        <p className="text-sm text-muted-foreground">Subscription data could not be retrieved. An active plan or successful payment has not been verified. Receipt verification does not require a payment.</p>
+        <Button variant="outline" size="sm" onClick={() => refetch()}>Retry billing status</Button>
+      </Card>
+    );
+  }
+
+  const plan = subscription.plan;
+  const status = subscription.status;
   const showManageBilling = plan !== "free" || !!subscription?.stripeSubscriptionId;
 
   return (
@@ -897,7 +999,7 @@ function BillingTab({ apiKeyCount }: { apiKeyCount: number }) {
               variant={status === "past_due" ? "destructive" : "outline"}
               data-testid="text-subscription-status"
             >
-              {status === "past_due" ? "Past Due" : status === "canceled" ? "Canceled" : "Active"}
+              {status === "past_due" ? "Past Due" : status === "canceled" ? "Canceled" : status === "active" ? "Active (reported)" : status || "Unknown"}
             </Badge>
           </div>
           {showManageBilling && (
@@ -968,7 +1070,13 @@ function BillingTab({ apiKeyCount }: { apiKeyCount: number }) {
 }
 
 export default function DashboardPage() {
-  const { user, isLoading: authLoading, logout } = useAuth();
+  const { user, isLoaded } = useUser();
+  const { userId: clerkUserId, sessionId } = useAuth();
+  const authLoading = !isLoaded;
+  const { signOut } = useClerk();
+  const logout = () => signOut({ redirectUrl: import.meta.env.BASE_URL });
+  const { data: principal } = useAppPrincipal();
+  const userId = principal?.id;
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const { theme, toggleTheme } = useTheme();
@@ -979,6 +1087,7 @@ export default function DashboardPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("github") === "connected") {
+      trackEvent("github_connected", { location: "dashboard" });
       toast({ title: "GitHub connected successfully" });
       window.history.replaceState({}, "", window.location.pathname);
     } else if (params.get("github") === "error") {
@@ -987,7 +1096,7 @@ export default function DashboardPage() {
     }
   }, []);
 
-  const { data: receipts, isLoading: receiptsLoading } = useQuery<AttestationReceipt[]>({
+  const { data: receipts, isLoading: receiptsLoading } = useQuery<AttestationWithLedgerStatus[]>({
     queryKey: ["/api/attestations"],
   });
 
@@ -1009,6 +1118,7 @@ export default function DashboardPage() {
 
   const { data: auditLogs, isLoading: auditLogsLoading } = useQuery<AuditLog[]>({
     queryKey: ["/api/audit-logs"],
+    refetchInterval: 60_000,
   });
 
   const uniqueProviders = useMemo(() => {
@@ -1032,6 +1142,19 @@ export default function DashboardPage() {
       return matchesSearch && matchesProvider && matchesCompliance;
     });
   }, [receipts, searchQuery, providerFilter, complianceFilter]);
+
+  const modelCountByFilePath = useMemo(() => {
+    const map = new Map<string, AttestationReceipt[]>();
+    for (const r of receipts ?? []) {
+      const key = logicalReceiptKey(r);
+      const entries = map.get(key) ?? [];
+      entries.push(r);
+      map.set(key, entries);
+    }
+    const counts = new Map<string, number>();
+    map.forEach((entries, key) => counts.set(key, declarationSummary(entries).declaredModelCount));
+    return counts;
+  }, [receipts]);
 
   const deleteKeyMutation = useMutation({
     mutationFn: async (id: number) => {
@@ -1087,11 +1210,12 @@ export default function DashboardPage() {
   });
 
   const [committingId, setCommittingId] = useState<number | null>(null);
+  const inFlightCommitIds = useRef<Set<number>>(new Set());
   const [selectedRepoId, setSelectedRepoId] = useState<string>(
     () => localStorage.getItem("forgeproof.backfillRepoId") ?? "__first__"
   );
 
-  const { data: userPrefs } = useQuery<{ defaultRepoId: string | null }>({
+  const { data: userPrefs } = useQuery<{ defaultRepoId: string | null; lastActiveTab: string | null }>({
     queryKey: ["/api/preferences"],
   });
 
@@ -1101,6 +1225,30 @@ export default function DashboardPage() {
       return res.json();
     },
   });
+
+  const VALID_TABS = ["attestations", "repositories", "api-keys", "teams", "billing", "activity-log"];
+  const [activeTab, setActiveTab] = useState(() => new URLSearchParams(window.location.search).has("github_app") ? "repositories" : "attestations");
+  const tabRestoredRef = useRef(new URLSearchParams(window.location.search).has("github_app"));
+
+  const saveTabMutation = useMutation({
+    mutationFn: async (lastActiveTab: string) => {
+      const res = await apiRequest("PATCH", "/api/preferences", { lastActiveTab });
+      return res.json();
+    },
+  });
+
+  useEffect(() => {
+    if (tabRestoredRef.current || !userPrefs) return;
+    tabRestoredRef.current = true;
+    if (userPrefs.lastActiveTab && VALID_TABS.includes(userPrefs.lastActiveTab)) {
+      setActiveTab(userPrefs.lastActiveTab);
+    }
+  }, [userPrefs]);
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    saveTabMutation.mutate(tab);
+  };
 
   useEffect(() => {
     if (!userPrefs) return;
@@ -1126,24 +1274,59 @@ export default function DashboardPage() {
     }
   }, [repos]);
 
+  const [commitDialogReceipt, setCommitDialogReceipt] = useState<AttestationReceipt | null>(null);
+  const [commitDialogMessage, setCommitDialogMessage] = useState("");
+
   const gitCommitMutation = useMutation({
-    mutationFn: async ({ id, repositoryId }: { id: number; repositoryId?: number }) => {
+    mutationFn: async ({ id, repositoryId, commitMessage }: { id: number; repositoryId?: number; commitMessage?: string }) => {
       setCommittingId(id);
-      const body = repositoryId ? { repositoryId } : {};
+      const body: { repositoryId?: number; commitMessage?: string } = {};
+      if (repositoryId) body.repositoryId = repositoryId;
+      if (commitMessage) body.commitMessage = commitMessage;
       const res = await apiRequest("POST", `/api/attestations/${id}/git-commit`, body);
       return res.json() as Promise<{ gitCommitUrl: string }>;
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/attestations"] });
+      trackEvent("receipt_committed_to_git", {
+        location: "dashboard",
+        custom_message: Boolean(variables.commitMessage),
+      });
       toast({ title: "Receipt committed to Git" });
     },
     onError: (error: Error) => {
       toast({ title: "Git commit failed", description: error.message, variant: "destructive" });
     },
-    onSettled: () => {
+    onSettled: (_data, _error, variables) => {
+      inFlightCommitIds.current.delete(variables.id);
       setCommittingId(null);
     },
   });
+
+  const commitReceiptToGit = (id: number) => {
+    if (inFlightCommitIds.current.has(id)) return;
+    const receipt = receipts?.find((r) => r.id === id);
+    if (!receipt) return;
+    setCommitDialogMessage(
+      `chore: ForgeProof attestation ${receipt.entryHash.slice(0, 8)} — ${receipt.modelProvider}/${receipt.modelName}`
+    );
+    setCommitDialogReceipt(receipt);
+  };
+
+  const confirmCommitToGit = () => {
+    if (!commitDialogReceipt) return;
+    const id = commitDialogReceipt.id;
+    if (inFlightCommitIds.current.has(id)) return;
+    inFlightCommitIds.current.add(id);
+    const autoMessage = `chore: ForgeProof attestation ${commitDialogReceipt.entryHash.slice(0, 8)} — ${commitDialogReceipt.modelProvider}/${commitDialogReceipt.modelName}`;
+    const trimmed = commitDialogMessage.trim();
+    gitCommitMutation.mutate({
+      id,
+      repositoryId: selectedRepoId !== "__first__" ? Number(selectedRepoId) : undefined,
+      commitMessage: trimmed && trimmed !== autoMessage ? trimmed : undefined,
+    });
+    setCommitDialogReceipt(null);
+  };
 
   const backfillGitMutation = useMutation({
     mutationFn: async (repositoryId?: number) => {
@@ -1153,6 +1336,10 @@ export default function DashboardPage() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/attestations"] });
+      trackEvent("receipt_backfill_completed", {
+        succeeded: data.succeeded,
+        failed: data.failed,
+      });
       if (data.failed === 0) {
         toast({ title: `${data.succeeded} receipt${data.succeeded === 1 ? "" : "s"} committed to Git` });
       } else {
@@ -1168,7 +1355,7 @@ export default function DashboardPage() {
     },
   });
 
-  const uncommittedCount = receipts?.filter((r) => !r.gitCommitUrl && r.userId === user?.id).length ?? 0;
+  const uncommittedCount = receipts?.filter((r) => !r.gitCommitUrl && r.userId === userId).length ?? 0;
 
   const gitCommitFailedIds = useMemo(() => {
     if (!auditLogs) return new Set<number>();
@@ -1211,13 +1398,17 @@ export default function DashboardPage() {
             <div className="flex items-center gap-3">
               <div className="hidden sm:flex items-center gap-2 mr-2">
                 <Avatar className="w-7 h-7">
-                  <AvatarImage src={user.profileImageUrl || ""} />
+                  <AvatarImage src={user.imageUrl || ""} />
                   <AvatarFallback className="text-xs">
-                    {(user.firstName?.[0] || user.email?.[0] || "U").toUpperCase()}
+                    {(user.firstName?.[0] || user.primaryEmailAddress?.emailAddress?.[0] || "U").toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
-                <span className="text-sm font-medium">{user.firstName || user.email || "User"}</span>
+                <span className="text-sm font-medium">{user.firstName || user.primaryEmailAddress?.emailAddress || "User"}</span>
               </div>
+              <StripeReadinessLink identity={
+                isLoaded && user?.id === clerkUserId && sessionId
+                  ? `${clerkUserId}:${sessionId}` : null
+              } />
               <Button
                 variant="ghost"
                 size="icon"
@@ -1243,32 +1434,34 @@ export default function DashboardPage() {
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <StatCard
-            label="Attestations"
-            value={receipts?.length ?? 0}
+            label="Your account receipts"
+            value={receipts?.length ?? "Unavailable"}
             icon={FileCheck}
             loading={receiptsLoading}
           />
           <StatCard
-            label="Repositories"
-            value={repos?.length ?? 0}
+            label="Your repositories"
+            value={repos?.length ?? "Unavailable"}
             icon={GitBranch}
             loading={reposLoading}
           />
           <StatCard
-            label="API Keys"
-            value={keys?.length ?? 0}
+            label="Your API key records"
+            value={keys?.length ?? "Unavailable"}
             icon={Key}
             loading={keysLoading}
           />
           <StatCard
             label="Chain Integrity"
-            value="Verified"
+            value="Not checked"
             icon={Link2}
             loading={false}
           />
         </div>
 
-        <Tabs defaultValue="attestations" className="space-y-4">
+        <HistoricalInventory />
+        <RuntimeVerificationChecklist ids={receipts?.map(receipt => receipt.id) || []} />
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
           <TabsList className="flex-wrap">
             <TabsTrigger value="attestations" data-testid="tab-attestations">
               <FileCheck className="w-4 h-4 mr-1.5" />
@@ -1394,6 +1587,40 @@ export default function DashboardPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <Dialog open={!!commitDialogReceipt} onOpenChange={(v) => { if (!v) setCommitDialogReceipt(null); }}>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Commit Receipt to Git</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                      Commit the receipt for <span className="font-medium text-foreground">{commitDialogReceipt?.fileName}</span> to your repository. You can edit the commit message or keep the auto-generated one.
+                    </p>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Commit Message</label>
+                      <Input
+                        value={commitDialogMessage}
+                        onChange={(e) => setCommitDialogMessage(e.target.value)}
+                        placeholder="Commit message"
+                        data-testid="input-dashboard-commit-message"
+                      />
+                    </div>
+                    <Button
+                      className="w-full"
+                      onClick={confirmCommitToGit}
+                      disabled={gitCommitMutation.isPending}
+                      data-testid="button-confirm-commit-git"
+                    >
+                      {gitCommitMutation.isPending ? (
+                        <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                      ) : (
+                        <SiGithub className="w-4 h-4 mr-1.5" />
+                      )}
+                      Commit to Git
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
               {receiptsLoading ? (
                 <LoadingRows />
               ) : filteredReceipts.length > 0 ? (
@@ -1409,10 +1636,11 @@ export default function DashboardPage() {
                       <AttestationRow
                         key={r.id}
                         receipt={r}
-                        onCommitToGit={githubStatus?.connected && r.userId === user.id ? (id) => gitCommitMutation.mutate({ id, repositoryId: selectedRepoId !== "__first__" ? Number(selectedRepoId) : undefined }) : undefined}
+                        onCommitToGit={githubStatus?.connected && r.userId === userId ? commitReceiptToGit : undefined}
                         isCommitting={committingId === r.id && gitCommitMutation.isPending}
                         hasGitFailure={gitCommitFailedIds.has(r.id) && !r.gitCommitUrl}
-                        targetRepoName={!r.gitCommitUrl && githubStatus?.connected && r.userId === user.id && resolvedRepo ? resolvedRepo.name : undefined}
+                        targetRepoName={!r.gitCommitUrl && githubStatus?.connected && r.userId === userId && resolvedRepo ? resolvedRepo.name : undefined}
+                        modelCount={modelCountByFilePath.get(logicalReceiptKey(r))}
                       />
                     );
                   })}
@@ -1434,6 +1662,7 @@ export default function DashboardPage() {
           </TabsContent>
 
           <TabsContent value="repositories">
+            <GitHubAppPanel />
             <Card className="mb-4">
               <div className="flex items-center justify-between gap-4 p-4">
                 {githubStatus?.connected ? (
@@ -1476,7 +1705,7 @@ export default function DashboardPage() {
                       size="sm"
                       onClick={async () => {
                         try {
-                          const res = await fetch("/api/github/connect", { credentials: "include" });
+                          const res = await apiRequest("GET", "/api/github/connect");
                           const data = await res.json();
                           if (data.url) {
                             window.location.href = data.url;
@@ -1629,6 +1858,10 @@ export default function DashboardPage() {
                               <span className="text-xs text-muted-foreground">#{log.resourceId}</span>
                             )}
                           </div>
+                          {log.metadata != null ? <details className="mt-2 text-xs">
+                            <summary className="cursor-pointer text-muted-foreground">Authorized audit metadata</summary>
+                            <pre className="mt-2 p-3 rounded-md bg-muted/50 whitespace-pre-wrap break-all">{JSON.stringify(redactMetadata(log.metadata), null, 2)}</pre>
+                          </details> : <p className="mt-1 text-xs text-muted-foreground">Audit details unavailable in this response; not evidence of absence.</p>}
                         </div>
                         <div className="text-xs text-muted-foreground whitespace-nowrap shrink-0" data-testid={`text-audit-log-time-${log.id}`}>
                           {formatRelativeTime(log.createdAt)}

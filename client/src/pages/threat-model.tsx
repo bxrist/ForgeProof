@@ -90,7 +90,7 @@ export default function ThreatModelPage() {
     {
       assumption: "AI provider truthfulness",
       detail: "ForgeProof records the model name and provider as declared by the API caller. It assumes the caller accurately reports which model generated the code.",
-      mitigation: "Use dedicated agent endpoints (/api/v1/agents/openai, /claude, /replit) which enforce provider-specific validation. Integrate attestation into your CI/CD pipeline where agent identity is controlled.",
+      mitigation: "Use dedicated agent endpoints which enforce provider-specific validation. Integrate attestation into your CI/CD pipeline where agent identity is controlled.",
     },
     {
       assumption: "Hash function security (SHA-256)",

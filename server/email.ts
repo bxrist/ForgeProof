@@ -1,4 +1,6 @@
 import nodemailer from "nodemailer";
+import { storage } from "./storage";
+import { escapeMarkup } from "./outputEncoding";
 
 function getTransport() {
   const host = process.env.SMTP_HOST;
@@ -25,16 +27,6 @@ export async function sendGitCommitFailureEmail(opts: {
   errorMessage: string;
   baseUrl: string;
 }): Promise<void> {
-  const transport = getTransport();
-  if (!transport) {
-    console.warn(
-      "[forgeproof] SMTP not configured – skipping git-commit-failure email to",
-      opts.to
-    );
-    return;
-  }
-
-  const from = process.env.SMTP_FROM ?? process.env.SMTP_USER;
   const settingsUrl = `${opts.baseUrl}/dashboard#github`;
 
   const text = [
@@ -64,9 +56,9 @@ export async function sendGitCommitFailureEmail(opts: {
   <h2 style="color:#2563eb">ForgeProof — GitHub commit failed</h2>
   <p>A ForgeProof attestation could not be committed to your GitHub repository.</p>
   <table style="border-collapse:collapse;width:100%;margin:16px 0">
-    <tr><td style="padding:6px 12px;background:#f1f5f9;font-weight:600;width:130px">Receipt ID</td><td style="padding:6px 12px;background:#f8fafc">${opts.receiptId}</td></tr>
-    <tr><td style="padding:6px 12px;background:#f1f5f9;font-weight:600">Entry hash</td><td style="padding:6px 12px;background:#f8fafc;font-family:monospace;font-size:13px">${opts.entryHash}</td></tr>
-    <tr><td style="padding:6px 12px;background:#f1f5f9;font-weight:600">Reason</td><td style="padding:6px 12px;background:#f8fafc">${opts.errorMessage}</td></tr>
+    <tr><td style="padding:6px 12px;background:#f1f5f9;font-weight:600;width:130px">Receipt ID</td><td style="padding:6px 12px;background:#f8fafc">${escapeMarkup(opts.receiptId)}</td></tr>
+    <tr><td style="padding:6px 12px;background:#f1f5f9;font-weight:600">Entry hash</td><td style="padding:6px 12px;background:#f8fafc;font-family:monospace;font-size:13px">${escapeMarkup(opts.entryHash)}</td></tr>
+    <tr><td style="padding:6px 12px;background:#f1f5f9;font-weight:600">Reason</td><td style="padding:6px 12px;background:#f8fafc">${escapeMarkup(opts.errorMessage)}</td></tr>
   </table>
   <p>This usually means your GitHub token has expired or been revoked. Re-connect your account to restore automatic provenance commits:</p>
   <p style="margin:24px 0">
@@ -78,13 +70,63 @@ export async function sendGitCommitFailureEmail(opts: {
 </body>
 </html>`;
 
-  await transport.sendMail({
-    from,
+  await storage.createPendingEmail({
     to: opts.to,
     subject: "ForgeProof: GitHub commit failed — action required",
-    text,
-    html,
+    bodyText: text,
+    bodyHtml: html,
   });
 
-  console.log("[forgeproof] git-commit-failure email sent to", opts.to);
+  console.log("[forgeproof] git-commit-failure email queued for", opts.to);
+}
+
+const MAX_EMAIL_ATTEMPTS = 5;
+// Backoff after 1st, 2nd, 3rd+ failed attempt (minutes)
+const RETRY_BACKOFF_MINUTES = [1, 5, 30];
+
+export async function flushEmailQueue(): Promise<void> {
+  const due = await storage.getDuePendingEmails();
+  if (due.length === 0) return;
+
+  const transport = getTransport();
+  if (!transport) {
+    console.warn(
+      `[forgeproof] SMTP not configured – ${due.length} queued email(s) remain pending`
+    );
+    return;
+  }
+
+  const from = process.env.SMTP_FROM ?? process.env.SMTP_USER;
+
+  for (const email of due) {
+    try {
+      await transport.sendMail({
+        from,
+        to: email.to,
+        subject: email.subject,
+        text: email.bodyText,
+        html: email.bodyHtml,
+      });
+      await storage.updatePendingEmail(email.id, { status: "sent" });
+      console.log("[forgeproof] queued email sent to", email.to);
+    } catch (err: any) {
+      const retryCount = email.retryCount + 1;
+      if (retryCount >= MAX_EMAIL_ATTEMPTS) {
+        await storage.updatePendingEmail(email.id, { retryCount, status: "failed" });
+        console.warn(
+          `[forgeproof] email to ${email.to} failed permanently after ${retryCount} attempts:`,
+          err?.message ?? err
+        );
+      } else {
+        const backoffMin =
+          RETRY_BACKOFF_MINUTES[Math.min(retryCount - 1, RETRY_BACKOFF_MINUTES.length - 1)];
+        const nextRetryAt = new Date(Date.now() + backoffMin * 60 * 1000);
+        await storage.updatePendingEmail(email.id, { retryCount, nextRetryAt });
+        console.warn(
+          `[forgeproof] email to ${email.to} failed (attempt ${retryCount}/${MAX_EMAIL_ATTEMPTS}), retrying in ${backoffMin}min:`,
+          err?.message ?? err
+        );
+      }
+    }
+  }
 }

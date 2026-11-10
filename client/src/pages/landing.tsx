@@ -5,7 +5,7 @@ import { useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { useAuth } from "@/hooks/use-auth";
+import { useUser } from "@clerk/react";
 import {
   Globe,
   Lock,
@@ -98,7 +98,7 @@ function ReceiptPreview() {
     { key: "receipt_version", value: '"v1"', color: "text-green-400" },
     { key: "timestamp", value: '"2026-02-21T08:30:00Z"', color: "text-yellow-400" },
     { key: "file_hash", value: '"sha256:a3f2e8..."', color: "text-cyan-400" },
-    { key: "model_name", value: '"gpt-4-turbo"', color: "text-green-400" },
+    { key: "model_name", value: '"gpt-5.6"', color: "text-green-400" },
     { key: "model_provider", value: '"OpenAI"', color: "text-green-400" },
     { key: "country_of_origin", value: '"US"', color: "text-orange-400" },
     { key: "signature", value: '"ed25519:7Bf3..."', color: "text-purple-400" },
@@ -136,7 +136,7 @@ function ReceiptPreview() {
 }
 
 function Navbar() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isSignedIn: isAuthenticated } = useUser();
   const { theme, toggleTheme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -153,9 +153,9 @@ function Navbar() {
           </Link>
 
           <div className="hidden md:flex items-center gap-1">
+            <a href="#why-forgeproof" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-why-forgeproof">Why ForgeProof</a>
             <a href="#architecture" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-architecture">Architecture</a>
             <a href="#use-cases" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-use-cases">Use Cases</a>
-            <a href="#why-forgeproof" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-why-forgeproof">Why ForgeProof</a>
             <a href="#pricing" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-pricing">Pricing</a>
             <a href="#regulations" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-compliance">Compliance</a>
             <Link href="/threat-model" className="px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground rounded-md" data-testid="nav-threat-model">Threat Model</Link>
@@ -191,12 +191,12 @@ function Navbar() {
                 </Button>
               </Link>
             ) : (
-              <Link href="/demo">
+              <><Link href="/sign-in"><Button variant="outline" size="sm">Sign In</Button></Link><Link href="/demo">
                 <Button size="sm" data-testid="button-try-demo">
                   Try the Demo
                   <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
                 </Button>
-              </Link>
+              </Link></>
             )}
           </div>
 
@@ -217,9 +217,9 @@ function Navbar() {
             animate={{ opacity: 1, height: "auto" }}
             className="md:hidden pb-4 space-y-2"
           >
+            <a href="#why-forgeproof" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-why-forgeproof">Why ForgeProof</a>
             <a href="#architecture" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-architecture">Architecture</a>
             <a href="#use-cases" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-use-cases">Use Cases</a>
-            <a href="#why-forgeproof" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-why-forgeproof">Why ForgeProof</a>
             <a href="#pricing" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-pricing">Pricing</a>
             <a href="#regulations" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-compliance">Compliance</a>
             <Link href="/threat-model" className="block px-3 py-2 text-sm text-muted-foreground hover:text-foreground" onClick={() => setMobileOpen(false)} data-testid="mobile-nav-threat-model">Threat Model</Link>
@@ -242,9 +242,9 @@ function Navbar() {
                   <Button size="sm" className="w-full">Dashboard</Button>
                 </Link>
               ) : (
-                <Link href="/demo">
+                <><Link href="/sign-in"><Button variant="outline" size="sm" className="w-full">Sign In</Button></Link><Link href="/demo">
                   <Button size="sm" className="w-full">Try the Demo</Button>
-                </Link>
+                </Link></>
               )}
             </div>
           </motion.div>
@@ -383,7 +383,7 @@ function SovereigntySection() {
             {
               icon: AlertTriangle,
               title: "No Model Accountability",
-              desc: "GPT-4, Claude, Gemini, Copilot — code ships from multiple AI models with no record of which model produced what. When a vulnerability appears, you can't trace it to its source.",
+              desc: "GPT-5, Claude Sonnet 5, Gemini 2.5, Copilot — code ships from multiple AI models with no record of which model produced what. When a vulnerability appears, you can't trace it to its source.",
               color: "text-red-500 dark:text-red-400",
               bgColor: "bg-red-500/10 dark:bg-red-400/20",
             },
@@ -538,7 +538,7 @@ function ArchitectureDiagramSection() {
     {
       id: "model",
       label: "AI Model",
-      desc: "GPT-4, Claude, Gemini, or any AI writes code",
+      desc: "GPT-5, Claude, Gemini 2.5, or any AI writes code",
       icon: Cpu,
       color: "border-blue-500/50 dark:border-blue-400/50",
       iconBg: "bg-blue-500/10 dark:bg-blue-400/20",
@@ -770,7 +770,7 @@ function UseCasesSection() {
       icon: Cpu,
       title: "AI Development Teams",
       audience: "Teams using multiple AI models in production",
-      desc: "Development teams using GPT-4, Claude, Copilot, and other models simultaneously need visibility into which model produced what. ForgeProof creates a permanent record across your entire AI-assisted workflow.",
+      desc: "Development teams using GPT-5, Claude Sonnet 5, Gemini 2.5, Copilot, and other models simultaneously need visibility into which model produced what. ForgeProof creates a permanent record across your entire AI-assisted workflow.",
       bullets: [
         "Multi-model tracking across repositories",
         "Security audit attestation with provider separation",
@@ -870,7 +870,7 @@ function MultiModelSection() {
     {
       label: "Origin",
       icon: Terminal,
-      provider: "OpenAI GPT-4",
+      provider: "OpenAI GPT-5",
       text: "Writes the code",
       accentClass: "border-blue-500/40 dark:border-blue-400/40",
       iconBgClass: "bg-blue-500/10 dark:bg-blue-400/20",
@@ -900,9 +900,9 @@ function MultiModelSection() {
   ];
 
   const chainReceipts = [
-    { id: "#1", label: "Origin", model: "GPT-4", hash: "sha256:abc" },
-    { id: "#2", label: "Audit", model: "Claude", hash: "sha256:abc" },
-    { id: "#3", label: "Remediation", model: "Claude", hash: "sha256:def" },
+    { id: "#1", label: "Origin", model: "GPT-5", hash: "sha256:abc" },
+    { id: "#2", label: "Audit", model: "Claude Sonnet 5", hash: "sha256:abc" },
+    { id: "#3", label: "Remediation", model: "Claude Sonnet 5", hash: "sha256:def" },
   ];
 
   return (
@@ -1001,7 +1001,7 @@ function PolicyEnforcementSection() {
       icon: Cpu,
       title: "Approved Model Lists",
       desc: "Define which AI models are authorized to generate code for specific projects. Reject attestations from unapproved models before they enter your provenance chain.",
-      example: "Policy: Only GPT-4-turbo and Claude Sonnet are approved for production code in the payments repository.",
+      example: "Policy: Only GPT-5 and Claude Sonnet 5 are approved for production code in the payments repository.",
     },
     {
       icon: Shield,
@@ -1196,7 +1196,7 @@ function WhyForgeProofSection() {
       name: "SBOM (SPDX / CycloneDX)",
       focus: "Software Composition & Dependency Tracking",
       desc: "Software Bills of Materials list every component, library, and dependency in a software product. Required by executive order for federal suppliers. Critical for vulnerability management.",
-      gap: "SBOMs track what components are in the software, not how they were created. An SBOM tells you the code uses express@4.18 — but not that GPT-4 wrote the authentication module or that Claude audited it. ForgeProof adds the AI provenance layer that SBOMs lack.",
+      gap: "SBOMs track what components are in the software, not how they were created. An SBOM tells you the code uses express@4.18 — but not that GPT-5 wrote the authentication module or that Claude Sonnet 5 audited it. ForgeProof adds the AI provenance layer that SBOMs lack.",
       icon: Layers,
       color: "text-emerald-500 dark:text-emerald-400",
       bgColor: "bg-emerald-500/10 dark:bg-emerald-400/20",
@@ -1583,7 +1583,7 @@ function RoadmapSection() {
   const planned = [
     { item: "SLSA provenance predicate integration", desc: "Generate SLSA-compatible provenance alongside ForgeProof receipts" },
     { item: "CI/CD pipeline plugins", desc: "GitHub Actions, GitLab CI, and Jenkins plugins for automatic attestation" },
-    { item: "Additional AI provider integrations", desc: "First-class support for Gemini, Mistral, Llama, and more" },
+    { item: "Additional AI provider integrations", desc: "First-class support for Gemini 2.5, Mistral, Llama, and more" },
     { item: "SBOM generation", desc: "Software Bill of Materials with ForgeProof provenance data" },
     { item: "Policy engine", desc: "Define and enforce attestation policies per repository or organization" },
     { item: "Attestation federation", desc: "Cross-instance attestation verification for supply chain transparency" },
@@ -1690,7 +1690,7 @@ const response = await fetch(
         file_path: "src/utils/auth.ts",
         file_hash: "sha256:a3f2e8c1..."
       }],
-      model_name: "gpt-4-turbo",
+      model_name: "gpt-5.6",
       model_provider: "OpenAI",
       country_of_origin: "US",
       session_id: "chatcmpl-abc123"
@@ -1712,7 +1712,7 @@ const response = await fetch(
         file_path: "src/server/api.ts",
         file_hash: "sha256:7b9e4d2f..."
       }],
-      model_name: "claude-sonnet-4-20250514",
+      model_name: "claude-sonnet-5",
       model_provider: "Anthropic",
       country_of_origin: "US",
       session_id: "msg_01XFDUDYJg"
@@ -1760,11 +1760,11 @@ const { receipts } = await response.json();`,
                 Built for AI Agents
               </h2>
               <p className="text-lg text-muted-foreground leading-relaxed">
-                Dedicated endpoints for each AI agent platform. OpenAI, Claude, and Replit Agent each get a tailored API that handles batch attestation with a single call.
+                Dedicated endpoints for AI agent platforms handle batch attestation with a single call.
               </p>
               <ul className="space-y-3">
                 {[
-                  "Dedicated endpoints: /api/v1/agents/openai, /claude, /replit",
+                  "Dedicated endpoints for supported AI agents",
                   "Batch attest multiple files in a single request",
                   "API key authentication with Bearer tokens",
                   "Geographic compliance verification on every request",
@@ -1807,7 +1807,7 @@ const { receipts } = await response.json();`,
                 <div className="w-3 h-3 rounded-full bg-[#febc2e]" />
                 <div className="w-3 h-3 rounded-full bg-[#28c840]" />
                 <div className="flex items-center gap-1 ml-3">
-                  {(["openai", "claude", "replit"] as const).map((agent) => (
+                  {(["openai", "claude"] as const).map((agent) => (
                     <button
                       key={agent}
                       onClick={() => setActiveAgent(agent)}
@@ -1948,7 +1948,7 @@ function PricingSection() {
                     </li>
                   ))}
                 </ul>
-                <a href="/api/login" className="w-full">
+                <a href="/sign-up" className="w-full">
                   <Button
                     className="w-full"
                     variant={tier.popular ? "default" : "outline"}
@@ -2249,17 +2249,19 @@ export default function LandingPage() {
     <div className="min-h-screen bg-background">
       <SEO title="ForgeProof - Code Provenance for the AI Era" description="Track AI-generated code provenance with cryptographic attestation. Ed25519 signatures, SHA-256 hash chains, geographic compliance verification." path="/" />
       <Navbar />
+      {/* Foundational: What is ForgeProof & why it exists */}
       <HeroSection />
       <StatsSection />
       <SovereigntySection />
-      <TrustSection />
+      <WhyForgeProofSection />
+      <PlatformFeaturesSection />
       <ArchitectureDiagramSection />
+      <TrustSection />
       <HowItWorksSection />
+      {/* Business value follows */}
       <UseCasesSection />
       <MultiModelSection />
       <PolicyEnforcementSection />
-      <PlatformFeaturesSection />
-      <WhyForgeProofSection />
       <PricingSection />
       <WhyHostedSection />
       <RegulatorySection />

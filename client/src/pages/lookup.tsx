@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { apiRequest, ApiError } from "@/lib/queryClient";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -7,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { ForgeProofLogo } from "@/components/ForgeProofLogo";
 import { useTheme } from "@/components/ThemeProvider";
 import { SEO } from "@/components/SEO";
+import { OfflineBanner } from "@/components/OfflineBanner";
+import { ReceiptClaims } from "@/components/ReceiptClaims";
 import {
   ArrowLeft,
   Search,
@@ -48,9 +51,9 @@ interface LookupResult {
 function ComplianceBadge({ status }: { status: string }) {
   if (status === "verified") {
     return (
-      <Badge variant="secondary" className="text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" data-testid="badge-compliance">
-        <ShieldCheck className="w-3 h-3 mr-1" />
-        Geo Verified
+      <Badge variant="outline" className="text-xs text-muted-foreground" data-testid="badge-compliance">
+        <ShieldQuestion className="w-3 h-3 mr-1" />
+        Stored geo label: verified
       </Badge>
     );
   }
@@ -58,7 +61,7 @@ function ComplianceBadge({ status }: { status: string }) {
     return (
       <Badge variant="destructive" className="text-xs" data-testid="badge-compliance">
         <ShieldAlert className="w-3 h-3 mr-1" />
-        Geo Mismatch
+        Stored geo label: mismatch
       </Badge>
     );
   }
@@ -89,20 +92,15 @@ export default function LookupPage() {
     setSearched(true);
 
     try {
-      const res = await fetch(`/api/lookup?q=${encodeURIComponent(trimmed)}`);
-      if (res.status === 404) {
-        setError("No attestation found for the given ID or hash.");
-        return;
-      }
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        setError(body?.message || "An error occurred while looking up the receipt.");
-        return;
-      }
+      const res = await apiRequest("GET", `/api/lookup?q=${encodeURIComponent(trimmed)}`);
       const data: LookupResult = await res.json();
       setResult(data);
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (error) {
+      setError(error instanceof ApiError
+        ? error.status === 404
+          ? "No attestation found for the given ID or hash."
+          : "An error occurred while looking up the receipt."
+        : "Network error. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -124,6 +122,7 @@ export default function LookupPage() {
   return (
     <div className="min-h-screen bg-background">
       <SEO title="Receipt Lookup" description="Look up and verify any attestation receipt by ID or entry hash." path="/lookup" />
+      <OfflineBanner />
       <header className="sticky top-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between gap-4 h-16">
@@ -273,7 +272,7 @@ export default function LookupPage() {
                     <XCircle className="w-5 h-5 text-red-600 dark:text-red-400 shrink-0" />
                   )}
                   <div>
-                    <div className="text-xs text-muted-foreground">Hash Chain</div>
+                    <div className="text-xs text-muted-foreground">Signed entry hash (not ledger continuity)</div>
                     <div className="text-sm font-medium" data-testid="text-hash-match-status">
                       {result.hashMatch ? "Matches" : "Doesn't Match"}
                     </div>
@@ -282,7 +281,7 @@ export default function LookupPage() {
 
                 <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/50">
                   <div>
-                    <div className="text-xs text-muted-foreground">Compliance</div>
+                    <div className="text-xs text-muted-foreground">Stored geographic label (not provider region verification)</div>
                     <div className="mt-0.5" data-testid="text-compliance-status">
                       <ComplianceBadge status={result.complianceStatus || "unverified"} />
                     </div>
@@ -290,6 +289,7 @@ export default function LookupPage() {
                 </div>
               </div>
 
+              <div className="mb-5"><ReceiptClaims receipt={result} /></div>
               <div className="space-y-4">
                 <div>
                   <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
@@ -315,15 +315,15 @@ export default function LookupPage() {
                 <div>
                   <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
                     <Cpu className="w-3.5 h-3.5" />
-                    <span className="font-medium uppercase tracking-wider">Model Info</span>
+                    <span className="font-medium uppercase tracking-wider">Signed model declarations</span>
                   </div>
                   <div className="space-y-1.5 pl-5">
                     <div className="flex items-start gap-2 text-sm">
-                      <span className="text-muted-foreground shrink-0">Name:</span>
+                      <span className="text-muted-foreground shrink-0">Declared model:</span>
                       <span className="font-medium" data-testid="text-model-name">{result.modelName}</span>
                     </div>
                     <div className="flex items-start gap-2 text-sm">
-                      <span className="text-muted-foreground shrink-0">Provider:</span>
+                      <span className="text-muted-foreground shrink-0">Declared provider:</span>
                       <span data-testid="text-model-provider">{result.modelProvider}</span>
                     </div>
                   </div>
@@ -336,12 +336,12 @@ export default function LookupPage() {
                   </div>
                   <div className="space-y-1.5 pl-5">
                     <div className="flex items-start gap-2 text-sm">
-                      <span className="text-muted-foreground shrink-0">Declared:</span>
+                      <span className="text-muted-foreground shrink-0">Claimed country:</span>
                       <span data-testid="text-country-declared">{result.countryOfOrigin}</span>
                     </div>
                     <div className="flex items-start gap-2 text-sm">
-                      <span className="text-muted-foreground shrink-0">Detected:</span>
-                      <span data-testid="text-country-detected">{result.detectedCountry || "N/A"}</span>
+                      <span className="text-muted-foreground shrink-0">IP-detected country:</span>
+                      <span data-testid="text-country-detected">{result.detectedCountry || "UNKNOWN"}</span>
                     </div>
                   </div>
                 </div>

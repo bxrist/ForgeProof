@@ -1,22 +1,37 @@
-import type { Express, Request } from "express";
+import type { Express, Request, NextFunction } from "express";
 import { createServer, type Server } from "http";
+import path from "path";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import rateLimit from "express-rate-limit";
-import { createUiLimiter, requireSessionCsrf } from "./httpSecurity";
-
 import { storage } from "./storage";
-import { pool } from "./db";
-import { setupAuth, isAuthenticated } from "./replit_integrations/auth/replitAuth";
-import { sha256, signData, getKeyPair, computeEntryHash, generateApiKey, verifySignature, getReceiptSigningTimestamp } from "./crypto";
+import { currentApplicationStorage, setVerifiedStoragePrincipal } from "./storageBackend";
+import type { GitStorage } from "./git-store/storage";
+import { randomUUID } from "node:crypto";
+import { registerDashboardAccessRoutes } from "./dashboardAccess";
+import { registerGitHubAppRoutes } from "./githubApp/routes";
+import { pool } from "./legacySqlPool";
+import { proveLifeosControl, restrictLifeosServiceWrites, verifyLifeosInTransaction, verifyLifeosGitState, type LifeosProof } from "./lifeosEntitlement";
+import { requireAuth as isAuthenticated, optionalAuth, sessionUserId } from "./middlewares/requireAuth";
+import { getAuth } from "@clerk/express";
+import { sha256, signData, getKeyPair, computeEntryHash, generateApiKey, verifySignature } from "./crypto";
 import { fetchUserRepos, fetchRepoFiles, fetchFileContent, fetchRepoCommits, fetchCommitFiles, commitAttestationToGit } from "./github";
-import { attestRequestSchema, agentAttestSchema, requestValidationIssues } from "./requestValidation";
+import { z } from "zod";
+import { escapeMarkup, DOCUMENT_CSP } from "./outputEncoding";
+import { getReceiptTimestamp, isReceiptIdQuery } from "./receiptTimestamp";
+import { toPublicReceipt } from "./publicReceipt";
+import { sourceManifest, parseSourceReference } from "./sourceManifest";
+import { declarationSummary, logicalReceiptHistory, manifestIdentity } from "@shared/receiptPresentation";
 import { getMcpManifest, handleMcpTool } from "./mcp";
 import { sendGitCommitFailureEmail } from "./email";
 import { attestationReceipts } from "@shared/schema";
 import { desc } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { hasApiKeyPermission, verifyGitHubWebhookSignature, mcpToolPermission, type ApiKeyPermission } from "./security";
-
-const uiLimiter = createUiLimiter();
+import { enqueueReceiptOutbox, getReceiptLedgerStatuses, stagingArchivePredecessor } from "./receiptOutbox";
+import {
+  EXPECTED_STRIPE_ACCOUNT_ID,
+  getConfiguredWebhookTargets,
+  getStripeReadiness,
+  reconcileStripe,
+} from "./stripeAdmin";
 
 const publicApiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -50,6 +65,40 @@ const demoLimiter = rateLimit({
   message: { message: "Too many requests to demo endpoints." },
 });
 
+const modelLabelSchema = z.string().min(1).max(256).regex(
+  new RegExp("^[\\p{L}\\p{N} ._:/@()+-]+$", "u"),
+  "Use letters, numbers, spaces, or ._:/@()+- for model names and providers",
+);
+
+const attestRequestSchema = z.object({
+  file_path: z.string(),
+  file_hash: z.string(),
+  model_name: modelLabelSchema,
+  model_provider: modelLabelSchema,
+  country_of_origin: z.string(),
+  repository: z.string().optional(),
+  file_name: z.string().optional(),
+  metadata: z.record(z.string(), z.any()).optional(),
+  attestation_type: z.enum(["origin", "security_audit", "refactor", "review"]).optional().default("origin"),
+  parent_attestation_id: z.number().optional(),
+  audit_verdict: z.enum(["secure", "flagged", "remediated", "needs_review"]).optional(),
+  audit_details: z.string().optional(),
+});
+
+const agentAttestSchema = z.object({
+  files: z.array(z.object({
+    file_path: z.string(),
+    file_hash: z.string(),
+    file_name: z.string().optional(),
+  })),
+  model_name: modelLabelSchema,
+  model_provider: modelLabelSchema,
+  country_of_origin: z.string(),
+  repository: z.string().optional(),
+  session_id: z.string().optional(),
+  metadata: z.record(z.string(), z.any()).optional(),
+});
+
 function detectCountryFromRequest(req: Request): string | null {
   const cfCountry = req.headers["cf-ipcountry"] as string | undefined;
   if (cfCountry && cfCountry !== "XX" && cfCountry !== "T1") return cfCountry;
@@ -73,16 +122,61 @@ function computeComplianceStatus(declared: string, detected: string | null): str
   return "mismatch";
 }
 
-async function authenticateApiKey(req: Request, requiredPermission: ApiKeyPermission): Promise<string | null> {
+function isTrustedAdmin(req: Request, res: any, next: NextFunction): void {
+  // Fail closed when the allowlist is absent. Only the verified local subject
+  // is accepted; email and display-name claims are intentionally ignored.
+  const trustedSubjects = (process.env.FORGEPROOF_ADMIN_USER_IDS || "")
+    .split(",")
+    .map((subject) => subject.trim())
+    .filter(Boolean);
+  const subject = req.dbUser?.id;
+  if (!trustedSubjects.length || typeof subject !== "string" || !trustedSubjects.includes(subject)) {
+    res.status(403).json({ message: "Forbidden" });
+    return;
+  }
+  next();
+}
+
+function hasAllowedAdminOrigin(req: Request): boolean {
+  const origin = req.get("origin");
+  if (!origin || req.get("sec-fetch-site") === "cross-site") return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.pathname !== "/" ||
+      parsed.search || parsed.hash) {
+    return false;
+  }
+  const configuration = getConfiguredWebhookTargets();
+  const currentTarget = configuration.currentTarget ||
+    configuration.targets.find((target) =>
+      target.environment === (process.env.NODE_ENV === "production" ? "production" : "development"),
+    );
+  return currentTarget?.origin === parsed.origin;
+}
+
+const stripeReconciliationBodySchema = z.object({
+  preservationConfirmed: z.literal(true),
+  expectedAccountId: z.string().regex(/^acct_[A-Za-z0-9]+$/),
+}).strict();
+
+async function authenticateApiKey(req: Request): Promise<string | null> {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) return null;
 
   const token = authHeader.substring(7);
   const keyHash = sha256(token);
   const apiKey = await storage.getApiKeyByHash(keyHash);
-  if (!apiKey || !apiKey.isActive || !hasApiKeyPermission(apiKey.permissions, requiredPermission)) return null;
+  if (!apiKey || !apiKey.isActive) return null;
+  const writing=req.method==="POST" && (req.path!=="/api/mcp/tools" ||
+    /^forgeproof_(?:audit_|batch_)?attest$/.test(String(req.body?.tool ?? "")));
+  if (!apiKey.permissions?.includes(writing ? "attest:write" : "attest:read")) return null;
   if (apiKey.expiresAt && new Date(apiKey.expiresAt) < new Date()) return null;
 
+  setVerifiedStoragePrincipal(apiKey.userId);
   await storage.updateApiKeyLastUsed(apiKey.id);
   return apiKey.userId;
 }
@@ -94,20 +188,41 @@ async function createAttestationReceipt(
   userId: string,
   data: { file_path: string; file_hash: string; file_name?: string; model_name: string; model_provider: string; country_of_origin: string; metadata?: any; attestation_type?: string; parent_attestation_id?: number; audit_verdict?: string; audit_details?: string },
   detectedCountry: string | null,
-  repositoryId?: number
+  repositoryId?: number,
+  lifeosProof?: LifeosProof
 ) {
-  const subscription = await storage.getOrCreateFreeSubscription(userId);
+  const subscription = lifeosProof ? null : await storage.getOrCreateFreeSubscription(userId);
 
   const fileName = data.file_name || data.file_path.split("/").pop() || "unknown";
   const { publicKey } = getKeyPair();
   const complianceStatus = computeComplianceStatus(data.country_of_origin, detectedCountry);
 
+  const gitStorage = currentApplicationStorage() as GitStorage | undefined;
+  if (gitStorage) {
+    return gitStorage.issueAttestationWithSigner({
+      userId, repositoryId:repositoryId ?? null, fileName, filePath:data.file_path,
+      fileHash:data.file_hash, modelName:data.model_name, modelProvider:data.model_provider,
+      countryOfOrigin:data.country_of_origin, detectedCountry, complianceStatus,
+      attestationType:data.attestation_type ?? "origin", parentAttestationId:data.parent_attestation_id ?? null,
+      auditVerdict:data.audit_verdict ?? null, auditDetails:data.audit_details ?? null,
+      metadata:data.metadata ?? null, receiptVersion:"v1", signedAt:new Date().toISOString(),
+    }, {publicKey, sign:async bytes=>signData(bytes.toString("utf8"))}, randomUUID(), lifeosProof ? async state=>{
+      const row=state.records.apiKeys[lifeosProof.apiKeyId];
+      const matches=!!row && await gitStorage.custody.matches(gitStorage.custodyScope,String(row.credentialRef),lifeosProof.keyHash);
+      verifyLifeosGitState(lifeosProof,userId,state,matches);
+    } : undefined);
+  }
+
+  const { drizzle } = await import("drizzle-orm/node-postgres");
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
       await client.query(`SELECT pg_advisory_xact_lock(${ADVISORY_LOCK_ID})`);
 
+      if (lifeosProof) {
+        await verifyLifeosInTransaction(client, lifeosProof, userId);
+      } else {
       const quotaResult = await client.query(
         `UPDATE subscriptions
          SET attestation_count = attestation_count + 1
@@ -118,16 +233,17 @@ async function createAttestationReceipt(
       if (quotaResult.rows.length === 0) {
         await client.query("ROLLBACK");
         const err: any = new Error(
-          `Monthly attestation limit reached (${subscription.attestationLimit} on the ${subscription.plan} plan). Upgrade your plan to continue attesting.`
+          `Monthly attestation limit reached (${subscription!.attestationLimit} on the ${subscription!.plan} plan). Upgrade your plan to continue attesting.`
         );
         err.status = 402;
         throw err;
+      }
       }
 
       const latestResult = await client.query(
         `SELECT entry_hash FROM attestation_receipts ORDER BY id DESC LIMIT 1`
       );
-      const prevEntryHash = latestResult.rows.length > 0 ? latestResult.rows[0].entry_hash : null;
+      const prevEntryHash = latestResult.rows.length > 0 ? latestResult.rows[0].entry_hash : await stagingArchivePredecessor(client);
 
       const timestamp = new Date().toISOString();
       const entryHash = computeEntryHash({
@@ -176,6 +292,7 @@ async function createAttestationReceipt(
         ]
       );
 
+      const gitLedgerStatus = await enqueueReceiptOutbox(client, insertResult.rows[0]);
       await client.query("COMMIT");
 
       const row = insertResult.rows[0];
@@ -205,6 +322,7 @@ async function createAttestationReceipt(
         gitCommitUrl: row.git_commit_url ?? null,
         metadata: row.metadata,
         createdAt: row.created_at,
+        ...(gitLedgerStatus === "pending" ? { gitLedgerStatus } : {}),
       };
     } catch (err: any) {
       await client.query("ROLLBACK");
@@ -224,53 +342,106 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  await setupAuth(app);
+  app.use("/api", restrictLifeosServiceWrites);
 
-  // ─── Auth ─────────────────────────────────────────
-  app.get("/api/auth/user", uiLimiter, (req, res) => {
-    if (!req.isAuthenticated() || !req.user) {
-      return res.status(401).json({ message: "Not authenticated" });
-    }
-    const user = req.user as any;
-    const claims = user.claims;
-    if (claims) {
-      return res.json({
-        id: claims.sub,
-        email: claims.email,
-        firstName: claims.first_name,
-        lastName: claims.last_name,
-        profileImageUrl: claims.profile_image_url,
+  app.post("/api/lifeos/attest", publicApiLimiter, async (req, res) => {
+    try {
+      const proof = await proveLifeosControl(req.headers.authorization);
+      const parsed = attestRequestSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: "Invalid attestation request" });
+      // First scope is a standalone origin receipt, not cross-tenant audit/lineage.
+      if ((parsed.data.attestation_type && parsed.data.attestation_type !== "origin") ||
+          parsed.data.parent_attestation_id || parsed.data.repository) {
+        return res.status(400).json({ message: "LifeOS service accepts standalone origin receipts only" });
+      }
+      const receipt = await createAttestationReceipt(
+        proof.userId,
+        { ...parsed.data, metadata: { ...parsed.data.metadata, source: "lifeos_service", metering: "internal" } },
+        detectCountryFromRequest(req), undefined, proof,
+      );
+      return res.status(201).json({ ...receipt, metering: "internal" });
+    } catch (error: any) {
+      return res.status(error.status || 500).json({
+        message: error.status === 403 ? error.message : "LifeOS attestation failed",
       });
     }
-    return res.json(user);
   });
+
+  // ─── Auth ─────────────────────────────────────────
+  app.get("/api/me", isAuthenticated, (req, res) => {
+    res.json({ id: req.dbUser!.id });
+  });
+
+  registerDashboardAccessRoutes(app);
+  registerGitHubAppRoutes(app);
 
   // ─── Attestations (authenticated) ─────────────────
-  app.get("/api/attestations", uiLimiter, isAuthenticated, async (req, res) => {
-    const user = req.user as any;
-    const userId = user.claims?.sub || user.id;
+  app.get("/api/attestations", isAuthenticated, async (req, res) => {
+    const userId = req.dbUser!.id;
     const attestations = await storage.getAttestations(userId);
-    res.json(attestations);
+    const ledgerStatuses = await getReceiptLedgerStatuses(attestations.map((receipt) => receipt.id));
+    res.json(attestations.map((receipt) => ({
+      ...receipt,
+      ...(ledgerStatuses.has(receipt.id) ? { gitLedgerStatus: ledgerStatuses.get(receipt.id) } : {}),
+    })));
   });
 
-  app.get("/api/attestations/:id", uiLimiter, isAuthenticated, async (req, res) => {
+  app.get("/api/attestations/:id", isAuthenticated, async (req, res) => {
     const id = parseInt(req.params.id as string);
     if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
-    const user = req.user as any;
-    const userId = user.claims?.sub || user.id;
+    const userId = req.dbUser!.id;
     const attestation = await storage.getAttestation(id);
     if (!attestation) return res.status(404).json({ message: "Not found" });
-    if (attestation.userId !== userId && attestation.userId !== "forgeproof-system") {
+    if (attestation.userId !== userId && attestation.userId !== "forgeproof-system" &&
+        !(await storage.getAttestations(userId)).some(r => r.id === attestation.id)) {
       return res.status(403).json({ message: "Forbidden" });
     }
-    const childAttestations = await storage.getAttestationsByParentId(id);
-    res.json({ ...attestation, childAttestations });
+    const childAttestations = attestation.userId === userId || attestation.userId === "forgeproof-system"
+      ? await storage.getAttestationsByParentId(id, attestation.userId)
+      : (await storage.getAttestations(userId)).filter(r => r.parentAttestationId === id && r.userId === attestation.userId);
+    const ledgerStatuses = await getReceiptLedgerStatuses([attestation.id]);
+    const gitStorage = currentApplicationStorage() as GitStorage | undefined;
+    const evidence = gitStorage?.getAuthorizedReceiptEvidence
+      ? await gitStorage.getAuthorizedReceiptEvidence(id, userId) : {};
+    res.json({
+      ...attestation,
+      ...evidence,
+      ...(ledgerStatuses.has(attestation.id) ? { gitLedgerStatus: ledgerStatuses.get(attestation.id) } : {}),
+      childAttestations,
+    });
+  });
+
+  // ─── Model Lineage ────────────────────────────────
+  app.get("/api/attestations/:id/source-manifest", isAuthenticated, demoLimiter, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ message: "Invalid ID" });
+    // Use the existing dashboard visibility policy; never use a caller-supplied
+    // repository/path with the server's GitHub credentials.
+    const visible = await storage.getAttestations(req.dbUser!.id);
+    const receipt = visible.find(r => r.id === id);
+    if (!receipt) return res.status(404).json({ message: "Not found" });
+    res.setHeader("Cache-Control", "private, no-store");
+    res.json(await sourceManifest(receipt));
+  });
+
+  app.get("/api/attestations/:id/lineage", isAuthenticated, async (req, res) => {
+    const id = parseInt(req.params.id as string);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
+    const userId = req.dbUser!.id;
+    const attestation = await storage.getAttestation(id);
+    if (!attestation) return res.status(404).json({ message: "Not found" });
+    if (attestation.userId !== userId && attestation.userId !== "forgeproof-system" &&
+        !(await storage.getAttestations(userId)).some(r => r.id === attestation.id)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    const lineage = logicalReceiptHistory(attestation, await storage.getAttestations(userId)).sort((a,b) => a.id - b.id);
+    res.json({ filePath: attestation.filePath, logicalFilePath: manifestIdentity(attestation.filePath) ?? attestation.filePath,
+      repositoryId: attestation.repositoryId ?? null, ...declarationSummary(lineage), lineage });
   });
 
   // ─── Git Backfill: bulk ────────────────────────────
-  app.post("/api/attestations/backfill-git", uiLimiter, isAuthenticated, async (req, res) => {
-    const user = req.user as any;
-    const userId = user.claims?.sub || user.id;
+  app.post("/api/attestations/backfill-git", isAuthenticated, async (req, res) => {
+    const userId = req.dbUser!.id;
 
     const dbUser = await storage.getUser(userId);
     if (!dbUser?.githubToken) {
@@ -341,6 +512,18 @@ export async function registerRoutes(
           attestation.modelName
         );
         await storage.updateAttestationGitCommitUrl(attestation.id, gitCommitUrl, commitMessage);
+        try {
+          await storage.createAuditLog({
+            userId,
+            action: "attestation.git_commit_succeeded",
+            resourceType: "attestation",
+            resourceId: String(attestation.id),
+            metadata: { receiptId: attestation.id, entryHash: attestation.entryHash, gitCommitUrl },
+            ipAddress: req.ip ?? null,
+          });
+        } catch (auditErr) {
+          console.error("[forgeproof] failed to write git_commit_succeeded audit log:", auditErr);
+        }
         succeeded++;
       } catch (err) {
         console.error(`[forgeproof] backfill git commit failed for attestation ${attestation.id}:`, err);
@@ -352,12 +535,11 @@ export async function registerRoutes(
   });
 
   // ─── Git Backfill: single attestation ─────────────
-  app.post("/api/attestations/:id/git-commit", uiLimiter, isAuthenticated, async (req, res) => {
+  app.post("/api/attestations/:id/git-commit", isAuthenticated, async (req, res) => {
     const id = parseInt(req.params.id as string);
     if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
 
-    const user = req.user as any;
-    const userId = user.claims?.sub || user.id;
+    const userId = req.dbUser!.id;
 
     const attestation = await storage.getAttestation(id);
     if (!attestation) return res.status(404).json({ message: "Not found" });
@@ -377,7 +559,10 @@ export async function registerRoutes(
       return res.status(400).json({ message: "No repositories connected. Add a repository first." });
     }
 
-    const { repositoryId, fullName: bodyFullName } = req.body as { repositoryId?: number; fullName?: string };
+    const { repositoryId, fullName: bodyFullName, commitMessage: customCommitMessage } = req.body as { repositoryId?: number; fullName?: string; commitMessage?: string };
+    if (customCommitMessage !== undefined && typeof customCommitMessage !== "string") {
+      return res.status(400).json({ message: "commitMessage must be a string." });
+    }
     let targetRepo = userRepos[0];
     if (repositoryId) {
       const found = userRepos.find((r) => r.id === repositoryId);
@@ -424,9 +609,22 @@ export async function registerRoutes(
         attestation.entryHash,
         receiptJson,
         attestation.modelProvider,
-        attestation.modelName
+        attestation.modelName,
+        customCommitMessage
       );
       await storage.updateAttestationGitCommitUrl(id, gitCommitUrl, commitMessage);
+      try {
+        await storage.createAuditLog({
+          userId,
+          action: "attestation.git_commit_succeeded",
+          resourceType: "attestation",
+          resourceId: String(id),
+          metadata: { receiptId: id, entryHash: attestation.entryHash, gitCommitUrl },
+          ipAddress: req.ip ?? null,
+        });
+      } catch (auditErr) {
+        console.error("[forgeproof] failed to write git_commit_succeeded audit log:", auditErr);
+      }
       res.json({ gitCommitUrl, commitMessage });
     } catch (err: any) {
       res.status(502).json({ message: `Git commit failed: ${err.message}` });
@@ -434,17 +632,15 @@ export async function registerRoutes(
   });
 
   // ─── GitHub Repositories ──────────────────────────
-  app.get("/api/repositories", uiLimiter, isAuthenticated, async (req, res) => {
-    const user = req.user as any;
-    const userId = user.claims?.sub || user.id;
+  app.get("/api/repositories", isAuthenticated, async (req, res) => {
+    const userId = req.dbUser!.id;
     const repos = await storage.getRepositories(userId);
     res.json(repos);
   });
 
-  app.post("/api/repositories/sync", uiLimiter, isAuthenticated, async (req, res) => {
+  app.post("/api/repositories/sync", isAuthenticated, async (req, res) => {
     try {
-      const user = req.user as any;
-      const userId = user.claims?.sub || user.id;
+      const userId = req.dbUser!.id;
       const githubRepos = await fetchUserRepos();
 
       let synced = 0;
@@ -480,12 +676,11 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/repositories/:id/files", uiLimiter, isAuthenticated, async (req, res) => {
+  app.get("/api/repositories/:id/files", isAuthenticated, async (req, res) => {
     try {
       const id = parseInt(req.params.id as string);
       if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
-      const user = req.user as any;
-      const userId = user.claims?.sub || user.id;
+      const userId = req.dbUser!.id;
       const repo = await storage.getRepository(id);
       if (!repo) return res.status(404).json({ message: "Repository not found" });
       if (repo.userId !== userId) return res.status(403).json({ message: "Forbidden" });
@@ -498,12 +693,11 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/repositories/:id/attest", uiLimiter, isAuthenticated, async (req, res) => {
+  app.post("/api/repositories/:id/attest", isAuthenticated, async (req, res) => {
     try {
       const id = parseInt(req.params.id as string);
       if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
-      const user = req.user as any;
-      const userId = user.claims?.sub || user.id;
+      const userId = req.dbUser!.id;
       const repo = await storage.getRepository(id);
       if (!repo) return res.status(404).json({ message: "Repository not found" });
       if (repo.userId !== userId) return res.status(403).json({ message: "Forbidden" });
@@ -547,10 +741,9 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/repositories", uiLimiter, isAuthenticated, async (req, res) => {
+  app.post("/api/repositories", isAuthenticated, async (req, res) => {
     try {
-      const user = req.user as any;
-      const userId = user.claims?.sub || user.id;
+      const userId = req.dbUser!.id;
       const { githubId, name, fullName, url, defaultBranch, description } = req.body;
       if (!name || !fullName || !url) {
         return res.status(400).json({ message: "name, fullName, and url are required" });
@@ -573,11 +766,10 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/repositories/:id", uiLimiter, isAuthenticated, async (req, res) => {
+  app.delete("/api/repositories/:id", isAuthenticated, async (req, res) => {
     const id = parseInt(req.params.id as string);
     if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
-    const user = req.user as any;
-    const userId = user.claims?.sub || user.id;
+    const userId = req.dbUser!.id;
     const repo = await storage.getRepository(id);
     if (!repo) return res.status(404).json({ message: "Not found" });
     if (repo.userId !== userId) return res.status(403).json({ message: "Forbidden" });
@@ -589,7 +781,7 @@ export async function registerRoutes(
   // ─── GitHub OAuth ──────────────────────────────────
   const oauthStates = new Map<string, number>();
 
-  app.get("/api/github/connect", uiLimiter, isAuthenticated, (req, res) => {
+  app.get("/api/github/connect", isAuthenticated, (req, res) => {
     const clientId = process.env.GITHUB_CLIENT_ID;
     if (!clientId) {
       return res.status(503).json({ message: "GitHub OAuth is not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET." });
@@ -607,7 +799,7 @@ export async function registerRoutes(
     res.json({ url });
   });
 
-  app.get("/api/github/callback", uiLimiter, async (req, res) => {
+  app.get("/api/github/callback", isAuthenticated, async (req, res) => {
     const { code, state } = req.query;
     if (!code) return res.redirect("/dashboard?github=error");
 
@@ -634,12 +826,7 @@ export async function registerRoutes(
         });
         const githubUser = await ghUserRes.json() as any;
 
-        if (req.isAuthenticated && req.isAuthenticated()) {
-          const userId = (req.user as any)?.claims?.sub || (req.user as any)?.id;
-          if (userId) {
-            await storage.updateUser(userId, { githubToken: tokenData.access_token, githubUsername: githubUser.login });
-          }
-        }
+        await storage.updateUser(req.dbUser!.id, { githubToken: tokenData.access_token, githubUsername: githubUser.login });
         res.redirect("/dashboard?github=connected");
       } else {
         res.redirect("/dashboard?github=error");
@@ -649,19 +836,17 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/github/status", uiLimiter, isAuthenticated, async (req, res) => {
+  app.get("/api/github/status", isAuthenticated, async (req, res) => {
     const configured = !!(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET);
-    const user = req.user as any;
-    const userId = user?.claims?.sub || user?.id;
+    const userId = req.dbUser!.id;
     const dbUser = userId ? await storage.getUser(userId) : null;
     const connected = !!(dbUser?.githubToken);
     const githubUsername = dbUser?.githubUsername || null;
     res.json({ configured, connected, githubUsername });
   });
 
-  app.get("/api/github/repos", uiLimiter, isAuthenticated, async (req, res) => {
-    const user = req.user as any;
-    const userId = user?.claims?.sub || user?.id;
+  app.get("/api/github/repos", isAuthenticated, async (req, res) => {
+    const userId = req.dbUser!.id;
     const dbUser = userId ? await storage.getUser(userId) : null;
     if (!dbUser?.githubToken) {
       return res.status(400).json({ message: "GitHub not connected" });
@@ -689,9 +874,21 @@ export async function registerRoutes(
   // ─── GitHub Webhook ──────────────────────────────────
   app.post("/api/github/webhook", agentApiLimiter, async (req, res) => {
     const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
-    if (!webhookSecret) return res.status(503).json({ message: "GitHub webhook secret is not configured" });
-    if (!verifyGitHubWebhookSignature(req.rawBody, req.headers["x-hub-signature-256"], webhookSecret)) {
-      return res.status(401).json({ message: "Invalid or missing GitHub webhook signature" });
+    if (!webhookSecret) {
+      return res.status(503).json({ message: "GitHub webhook is not configured" });
+    }
+    const sigHeader = req.headers["x-hub-signature-256"];
+    if (typeof sigHeader !== "string" || !/^sha256=[a-f0-9]{64}$/.test(sigHeader)) {
+      return res.status(401).json({ message: "Invalid webhook signature" });
+    }
+    // GitHub signs the exact request bytes, not the parsed/re-serialized JSON.
+    if (!Buffer.isBuffer(req.rawBody)) {
+      return res.status(400).json({ message: "Raw webhook body is required" });
+    }
+    const expectedSig = createHmac("sha256", webhookSecret).update(req.rawBody).digest();
+    const suppliedSig = Buffer.from(sigHeader.slice(7), "hex");
+    if (!timingSafeEqual(suppliedSig, expectedSig)) {
+      return res.status(401).json({ message: "Invalid webhook signature" });
     }
 
     const event = req.headers["x-github-event"] as string;
@@ -750,18 +947,17 @@ export async function registerRoutes(
   });
 
   // ─── Billing ──────────────────────────────────────
-  app.get("/api/billing/subscription", uiLimiter, isAuthenticated, async (req, res) => {
-    const user = req.user as any;
-    const userId = user.claims?.sub || user.id;
+  app.get("/api/billing/subscription", isAuthenticated, async (req, res) => {
+    const userId = req.dbUser!.id;
     const subscription = await storage.getOrCreateFreeSubscription(userId);
     res.json(subscription);
   });
 
-  app.post("/api/billing/checkout", uiLimiter, isAuthenticated, async (req, res) => {
+  app.post("/api/billing/checkout", isAuthenticated, async (req, res) => {
     try {
-      const user = req.user as any;
-      const userId = user.claims?.sub || user.id;
-      const email = user.claims?.email || user.email || null;
+      const userId = req.dbUser!.id;
+      const claimEmail = getAuth(req).sessionClaims?.email;
+      const email = typeof claimEmail === "string" ? claimEmail : null;
       const { plan } = req.body;
       if (plan !== "pro" && plan !== "enterprise") {
         return res.status(400).json({ message: "Invalid plan. Choose 'pro' or 'enterprise'." });
@@ -777,10 +973,9 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/billing/portal", uiLimiter, isAuthenticated, async (req, res) => {
+  app.post("/api/billing/portal", isAuthenticated, async (req, res) => {
     try {
-      const user = req.user as any;
-      const userId = user.claims?.sub || user.id;
+      const userId = req.dbUser!.id;
       const { createPortalSession } = await import("./stripe");
       const baseUrl = `${req.protocol}://${req.get("host")}`;
       const url = await createPortalSession(userId, baseUrl);
@@ -793,21 +988,19 @@ export async function registerRoutes(
   });
 
   // ─── API Keys ─────────────────────────────────────
-  app.get("/api/api-keys", uiLimiter, isAuthenticated, async (req, res) => {
-    const user = req.user as any;
-    const userId = user.claims?.sub || user.id;
+  app.get("/api/api-keys", isAuthenticated, async (req, res) => {
+    const userId = req.dbUser!.id;
     const keys = await storage.getApiKeys(userId);
     const safeKeys = keys.map(({ keyHash, ...rest }) => rest);
     res.json(safeKeys);
   });
 
-  app.post("/api/api-keys", uiLimiter, isAuthenticated, async (req, res) => {
+  app.post("/api/api-keys", isAuthenticated, async (req, res) => {
     const { name } = req.body;
     if (!name || typeof name !== "string") {
       return res.status(400).json({ message: "Name is required" });
     }
-    const user = req.user as any;
-    const userId = user.claims?.sub || user.id;
+    const userId = req.dbUser!.id;
 
     const subscription = await storage.getOrCreateFreeSubscription(userId);
     if (subscription.apiKeyLimit !== -1) {
@@ -830,27 +1023,24 @@ export async function registerRoutes(
     res.json({ ...apiKey, fullKey });
   });
 
-  app.delete("/api/api-keys/:id", uiLimiter, isAuthenticated, async (req, res) => {
+  app.delete("/api/api-keys/:id", isAuthenticated, async (req, res) => {
     const id = parseInt(req.params.id as string);
     if (isNaN(id)) return res.status(400).json({ message: "Invalid ID" });
-    const user = req.user as any;
-    const userId = user.claims?.sub || user.id;
+    const userId = req.dbUser!.id;
     await storage.deleteApiKey(id, userId);
     await storage.createAuditLog({ userId, action: "api_key.deleted", resourceType: "api_key", resourceId: String(req.params.id) });
     res.json({ message: "Deleted" });
   });
 
   // ─── Organizations ──────────────────────────────────
-  app.get("/api/organizations", uiLimiter, isAuthenticated, async (req, res) => {
-    const user = req.user as any;
-    const userId = user?.claims?.sub || user?.id;
+  app.get("/api/organizations", isAuthenticated, async (req, res) => {
+    const userId = req.dbUser!.id;
     const orgs = await storage.getOrganizations(userId);
     res.json(orgs);
   });
 
-  app.post("/api/organizations", uiLimiter, isAuthenticated, async (req, res) => {
-    const user = req.user as any;
-    const userId = user?.claims?.sub || user?.id;
+  app.post("/api/organizations", isAuthenticated, async (req, res) => {
+    const userId = req.dbUser!.id;
     const { name, description } = req.body;
     if (!name) return res.status(400).json({ message: "Name is required" });
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -862,37 +1052,70 @@ export async function registerRoutes(
     res.json(org);
   });
 
-  app.get("/api/organizations/:id/members", uiLimiter, isAuthenticated, async (req, res) => {
+  app.get("/api/organizations/:id/members", isAuthenticated, async (req, res) => {
     const orgId = parseInt(req.params.id as string);
-    const user = req.user as any;
-    const userId = user?.claims?.sub || user?.id;
+    const userId = req.dbUser!.id;
     const member = await storage.getOrgMember(orgId, userId);
     if (!member) return res.status(403).json({ message: "Not a member of this organization" });
     const members = await storage.getOrgMembers(orgId);
     res.json(members);
   });
 
-  app.post("/api/organizations/:id/members", uiLimiter, isAuthenticated, async (req, res) => {
-    const orgId = parseInt(req.params.id as string);
-    const user = req.user as any;
-    const userId = user?.claims?.sub || user?.id;
-    const member = await storage.getOrgMember(orgId, userId);
-    if (!member || (member.role !== "owner" && member.role !== "admin")) {
-      return res.status(403).json({ message: "Only owners and admins can add members" });
+  app.post("/api/organizations/:id/members", isAuthenticated, async (req, res, next) => {
+    const orgId = Number(req.params.id);
+    const userId = req.dbUser!.id;
+    const { userId: newUserId, role = "member" } = req.body;
+    if (!Number.isSafeInteger(orgId) || orgId <= 0 || typeof newUserId !== "string" || !newUserId) {
+      return res.status(400).json({ message: "Valid organization and userId are required" });
     }
-    const { userId: newUserId, role } = req.body;
-    if (!newUserId) return res.status(400).json({ message: "userId is required" });
-    const existing = await storage.getOrgMember(orgId, newUserId);
-    if (existing) return res.status(409).json({ message: "User is already a member" });
-    const newMember = await storage.addOrgMember({ orgId, userId: newUserId, role: role || "member" });
-    await storage.createAuditLog({ userId, action: "org.member_added", resourceType: "organization", resourceId: String(orgId), metadata: { addedUserId: newUserId, role: role || "member" } });
-    res.json(newMember);
+    if (!["member", "admin"].includes(role)) return res.status(403).json({ message: "Invalid role" });
+    const git=currentApplicationStorage() as GitStorage | undefined;
+    if (git) {
+      try { return res.json(await git.addOrgMemberAuthorized(orgId,newUserId,role)); }
+      catch(error) { return next(error); }
+    }
+    const client = await pool.connect();
+    let inTransaction = false;
+    try {
+      await client.query("BEGIN");
+      inTransaction = true;
+      const org = await client.query("SELECT owner_id FROM organizations WHERE id=$1 FOR UPDATE", [orgId]);
+      const member = await client.query("SELECT role FROM org_members WHERE org_id=$1 AND user_id=$2 FOR UPDATE", [orgId, userId]);
+      const owner = org.rows[0]?.owner_id === userId;
+      if (!org.rows.length || (!owner && (role === "admin" || !member.rows.some(m => m.role === "admin")))) {
+        await client.query("ROLLBACK");
+        inTransaction = false;
+        return res.status(403).json({ message: "Only current owners/admins can add members; only owners can appoint admins" });
+      }
+      const existing = await client.query("SELECT id FROM org_members WHERE org_id=$1 AND user_id=$2", [orgId, newUserId]);
+      if (existing.rows.length) {
+        await client.query("ROLLBACK");
+        inTransaction = false;
+        return res.status(409).json({ message: "User is already a member" });
+      }
+      const { rows } = await client.query(`INSERT INTO org_members(org_id,user_id,role) VALUES($1,$2,$3)
+        RETURNING id, org_id AS "orgId", user_id AS "userId", role, created_at AS "createdAt"`, [orgId, newUserId, role]);
+      // Keep the audit atomic with membership and avoid acquiring another pool connection.
+      await client.query(`INSERT INTO audit_logs(user_id,action,resource_type,resource_id,metadata)
+        VALUES($1,$2,$3,$4,$5)`, [userId, "org.member_added", "organization", String(orgId), JSON.stringify({ addedUserId: newUserId, role })]);
+      await client.query("COMMIT");
+      inTransaction = false;
+      res.json(rows[0]);
+    } catch (error) {
+      if (inTransaction) {
+        try { await client.query("ROLLBACK"); }
+        catch (rollbackError) {
+          next(new AggregateError([error, rollbackError], "Membership transaction and rollback failed"));
+          return;
+        }
+      }
+      next(error);
+    } finally { client.release(); }
   });
 
-  app.delete("/api/organizations/:id", uiLimiter, isAuthenticated, async (req, res) => {
+  app.delete("/api/organizations/:id", isAuthenticated, async (req, res) => {
     const orgId = parseInt(req.params.id as string);
-    const user = req.user as any;
-    const userId = user?.claims?.sub || user?.id;
+    const userId = req.dbUser!.id;
     const org = await storage.getOrganization(orgId);
     if (!org || org.ownerId !== userId) return res.status(403).json({ message: "Only the owner can delete this organization" });
     await storage.deleteOrganization(orgId);
@@ -901,45 +1124,73 @@ export async function registerRoutes(
   });
 
   // ─── Audit Logs ──────────────────────────────────
-  app.get("/api/audit-logs", uiLimiter, isAuthenticated, async (req, res) => {
-    const user = req.user as any;
-    const userId = user?.claims?.sub || user?.id;
+  app.get("/api/audit-logs", isAuthenticated, async (req, res) => {
+    const userId = req.dbUser!.id;
     const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
-    const logs = await storage.getAuditLogs(userId, limit);
+    const gitStorage = currentApplicationStorage() as GitStorage | undefined;
+    const logs = gitStorage?.getAuthorizedAuditLogs
+      ? await gitStorage.getAuthorizedAuditLogs(userId, limit) : await storage.getAuditLogs(userId, limit);
     res.json(logs);
   });
 
   // ─── Notification Preferences ──────────────────────
-  app.get("/api/notifications/preferences", uiLimiter, isAuthenticated, async (req, res) => {
-    const user = req.user as any;
-    const userId = user?.claims?.sub || user?.id;
+  app.get("/api/notifications/preferences", isAuthenticated, async (req, res) => {
+    const userId = req.dbUser!.id;
     const dbUser = await storage.getUser(userId);
-    res.json({ notificationEmail: dbUser?.notificationEmail || null });
+    res.json({
+      notificationEmail: dbUser?.notificationEmail || null,
+      notifyOnGitFailure: dbUser?.notifyOnGitFailure ?? true,
+    });
   });
 
-  app.post("/api/notifications/preferences", uiLimiter, isAuthenticated, async (req, res) => {
-    const user = req.user as any;
-    const userId = user?.claims?.sub || user?.id;
-    const { notificationEmail } = req.body;
-    await storage.updateUser(userId, { notificationEmail: notificationEmail || null });
+  app.post("/api/notifications/preferences", isAuthenticated, async (req, res) => {
+    const userId = req.dbUser!.id;
+    const { notificationEmail, notifyOnGitFailure } = req.body;
+    if (notifyOnGitFailure !== undefined && typeof notifyOnGitFailure !== "boolean") {
+      return res.status(400).json({ message: "notifyOnGitFailure must be a boolean." });
+    }
+    const update: Record<string, any> = {};
+    if (notificationEmail !== undefined) update.notificationEmail = notificationEmail || null;
+    if (notifyOnGitFailure !== undefined) update.notifyOnGitFailure = notifyOnGitFailure;
+    await storage.updateUser(userId, update);
     await storage.createAuditLog({ userId, action: "notifications.updated", resourceType: "user", resourceId: userId });
-    res.json({ notificationEmail });
+    const dbUser = await storage.getUser(userId);
+    res.json({
+      notificationEmail: dbUser?.notificationEmail || null,
+      notifyOnGitFailure: dbUser?.notifyOnGitFailure ?? true,
+    });
   });
 
   // ─── User Preferences ──────────────────────────────
-  app.get("/api/preferences", uiLimiter, isAuthenticated, async (req, res) => {
-    const user = req.user as any;
-    const userId = user?.claims?.sub || user?.id;
+  app.get("/api/preferences", isAuthenticated, async (req, res) => {
+    const userId = req.dbUser!.id;
     const dbUser = await storage.getUser(userId);
-    res.json({ defaultRepoId: dbUser?.defaultRepoId || null });
+    res.json({
+      defaultRepoId: dbUser?.defaultRepoId || null,
+      detailRepoId: dbUser?.detailRepoId || null,
+      lastActiveTab: dbUser?.lastActiveTab || null,
+    });
   });
 
-  app.patch("/api/preferences", uiLimiter, isAuthenticated, async (req, res) => {
-    const user = req.user as any;
-    const userId = user?.claims?.sub || user?.id;
-    const { defaultRepoId } = req.body;
-    await storage.updateUser(userId, { defaultRepoId: defaultRepoId || null });
-    res.json({ defaultRepoId: defaultRepoId || null });
+  app.patch("/api/preferences", isAuthenticated, async (req, res) => {
+    const userId = req.dbUser!.id;
+    const { defaultRepoId, detailRepoId, lastActiveTab } = req.body;
+    if (lastActiveTab !== undefined && lastActiveTab !== null && typeof lastActiveTab !== "string") {
+      return res.status(400).json({ message: "lastActiveTab must be a string." });
+    }
+    const update: Record<string, any> = {};
+    if (defaultRepoId !== undefined) update.defaultRepoId = defaultRepoId || null;
+    if (detailRepoId !== undefined) update.detailRepoId = detailRepoId || null;
+    if (lastActiveTab !== undefined) update.lastActiveTab = lastActiveTab || null;
+    if (Object.keys(update).length > 0) {
+      await storage.updateUser(userId, update);
+    }
+    const dbUser = await storage.getUser(userId);
+    res.json({
+      defaultRepoId: dbUser?.defaultRepoId || null,
+      detailRepoId: dbUser?.detailRepoId || null,
+      lastActiveTab: dbUser?.lastActiveTab || null,
+    });
   });
 
   // ─── Public Demo ──────────────────────────────────
@@ -947,6 +1198,8 @@ export async function registerRoutes(
     try {
       let attestations = await storage.getSystemAttestations();
       if (attestations.length === 0) {
+        // Git-native production must not attempt the legacy PostgreSQL demo seeder.
+        if (currentApplicationStorage()) return res.json([]);
         try {
           const { seedDatabase } = await import("./seed");
           await seedDatabase();
@@ -971,40 +1224,36 @@ export async function registerRoutes(
     if (attestation.userId !== "forgeproof-system") {
       return res.status(403).json({ message: "Only system attestations are publicly accessible" });
     }
-    const childAttestations = await storage.getAttestationsByParentId(id);
+    const childAttestations = await storage.getAttestationsByParentId(id, attestation.userId);
     res.json({ ...attestation, childAttestations });
   });
 
   // ─── Public Attestation API (generic) ─────────────
-  app.post("/api/v1/attest", publicApiLimiter, async (req, res) => {
+  app.post("/api/v1/attest", publicApiLimiter, optionalAuth, async (req, res) => {
     let userId: string | null = null;
 
-    userId = await authenticateApiKey(req, "attest:write");
-    if (!userId && req.isAuthenticated()) {
-      let csrfValid = false;
-      requireSessionCsrf(req, res, () => { csrfValid = true; });
-      if (!csrfValid) return;
-      const user = req.user as any;
-      userId = user.claims?.sub || user.id;
-    }
+    userId = await authenticateApiKey(req);
+    if (!userId) userId = sessionUserId(req);
     if (!userId) {
       return res.status(401).json({ message: "Authentication required. Provide a Bearer API key or session." });
     }
+    setVerifiedStoragePrincipal(userId);
+    if (currentApplicationStorage()) await storage.ensureUser(userId);
 
     const parsed = attestRequestSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ message: "Invalid request", errors: requestValidationIssues(parsed.error, req.body) });
+      return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
     }
 
     const data = parsed.data;
     const attestationType = data.attestation_type || "origin";
 
-    if (attestationType !== "origin") {
+    if (attestationType !== "origin" || data.parent_attestation_id !== undefined) {
       if (!data.parent_attestation_id) {
         return res.status(400).json({ message: "parentAttestationId is required for non-origin attestation types" });
       }
       const parentAttestation = await storage.getAttestation(data.parent_attestation_id);
-      if (!parentAttestation) {
+      if (!parentAttestation || parentAttestation.userId !== userId) {
         return res.status(400).json({ message: "Parent attestation not found" });
       }
       if (attestationType === "security_audit" && parentAttestation.modelProvider === data.model_provider) {
@@ -1075,6 +1324,18 @@ export async function registerRoutes(
               if (commitResult) {
                 gitCommitUrl = commitResult.commitUrl;
                 await storage.updateAttestationGitCommitUrl(receipt.id, commitResult.commitUrl, commitResult.commitMessage);
+                try {
+                  await storage.createAuditLog({
+                    userId,
+                    action: "attestation.git_commit_succeeded",
+                    resourceType: "attestation",
+                    resourceId: String(receipt.id),
+                    metadata: { receiptId: receipt.id, entryHash: receipt.entryHash, gitCommitUrl },
+                    ipAddress: req.ip ?? null,
+                  });
+                } catch (auditErr) {
+                  console.error("[forgeproof] failed to write git_commit_succeeded audit log:", auditErr);
+                }
               }
             }
           }
@@ -1101,7 +1362,7 @@ export async function registerRoutes(
         try {
           const failedUser = userId ? await storage.getUser(userId) : null;
           const notifEmail = failedUser?.notificationEmail;
-          if (notifEmail) {
+          if (notifEmail && (failedUser?.notifyOnGitFailure ?? true)) {
             const baseUrl = `${req.protocol}://${req.get("host")}`;
             await sendGitCommitFailureEmail({
               to: notifEmail,
@@ -1130,10 +1391,19 @@ export async function registerRoutes(
     const attestation = await storage.getAttestation(id);
     if (!attestation) return res.status(404).json({ message: "Attestation not found" });
 
+    const userId = await authenticateApiKey(req) ||
+      sessionUserId(req);
+    if (attestation.userId !== "forgeproof-system" && attestation.userId !== userId) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    // Legacy cross-owner links must not disclose or pollute another owner's graph.
+    const ownerId = attestation.userId;
     let root = attestation;
+    const ancestors = new Set([root.id]);
     while (root.parentAttestationId) {
       const parent = await storage.getAttestation(root.parentAttestationId);
-      if (!parent) break;
+      if (!parent || parent.userId !== ownerId || ancestors.has(parent.id)) break;
+      ancestors.add(parent.id);
       root = parent;
     }
 
@@ -1143,9 +1413,9 @@ export async function registerRoutes(
 
     while (queue.length > 0) {
       const currentId = queue.shift()!;
-      const children = await storage.getAttestationsByParentId(currentId);
+      const children = await storage.getAttestationsByParentId(currentId, ownerId);
       for (const child of children) {
-        if (!visited.has(child.id)) {
+        if (child.userId === ownerId && !visited.has(child.id)) {
           visited.add(child.id);
           chain.push(child);
           queue.push(child.id);
@@ -1155,19 +1425,19 @@ export async function registerRoutes(
 
     res.json({
       rootId: root.id,
-      attestations: chain,
+      attestations: chain.map(toPublicReceipt),
       chainLength: chain.length,
     });
   });
 
   // ─── AI Agent Endpoints ───────────────────────────
   app.post("/api/v1/agents/openai", agentApiLimiter, async (req, res) => {
-    let userId = await authenticateApiKey(req, "attest:write");
+    let userId = await authenticateApiKey(req);
     if (!userId) return res.status(401).json({ message: "Bearer API key required" });
 
     const parsed = agentAttestSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ message: "Invalid request", errors: requestValidationIssues(parsed.error, req.body) });
+      return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
     }
 
     const data = parsed.data;
@@ -1202,12 +1472,12 @@ export async function registerRoutes(
   });
 
   app.post("/api/v1/agents/claude", agentApiLimiter, async (req, res) => {
-    let userId = await authenticateApiKey(req, "attest:write");
+    let userId = await authenticateApiKey(req);
     if (!userId) return res.status(401).json({ message: "Bearer API key required" });
 
     const parsed = agentAttestSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ message: "Invalid request", errors: requestValidationIssues(parsed.error, req.body) });
+      return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
     }
 
     const data = parsed.data;
@@ -1242,12 +1512,12 @@ export async function registerRoutes(
   });
 
   app.post("/api/v1/agents/replit", agentApiLimiter, async (req, res) => {
-    let userId = await authenticateApiKey(req, "attest:write");
+    let userId = await authenticateApiKey(req);
     if (!userId) return res.status(401).json({ message: "Bearer API key required" });
 
     const parsed = agentAttestSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ message: "Invalid request", errors: requestValidationIssues(parsed.error, req.body) });
+      return res.status(400).json({ message: "Invalid request", errors: parsed.error.issues });
     }
 
     const data = parsed.data;
@@ -1284,6 +1554,7 @@ export async function registerRoutes(
   // ─── Hash Chain Verification ──────────────────────
   app.get("/api/verify/chain", verifyLimiter, async (_req, res) => {
     const allAttestations = await storage.getAllAttestationsOrdered();
+    const ledgerStatuses = await getReceiptLedgerStatuses(allAttestations.map((entry) => entry.id));
     const results = [];
     let prevHash: string | null = null;
     let allValid = true;
@@ -1292,7 +1563,7 @@ export async function registerRoutes(
       const expectedPrev = prevHash;
       const chainValid = entry.prevEntryHash === expectedPrev;
 
-      const timestamp = getReceiptSigningTimestamp(entry);
+      const timestamp = getReceiptTimestamp(entry) || "";
       const recomputedHash = computeEntryHash({
         fileHash: entry.fileHash,
         modelName: entry.modelName,
@@ -1319,9 +1590,9 @@ export async function registerRoutes(
         signatureValid,
         hashMatch,
         valid: entryValid,
+        ...(ledgerStatuses.has(entry.id) ? { gitLedgerStatus: ledgerStatuses.get(entry.id) } : {}),
         complianceStatus: entry.complianceStatus,
         createdAt: entry.createdAt,
-        signedAt: entry.signedAt,
       });
 
       prevHash = entry.entryHash;
@@ -1336,7 +1607,7 @@ export async function registerRoutes(
     const entry = await storage.getAttestation(id);
     if (!entry) return res.status(404).json({ message: "Not found" });
 
-    const timestamp = getReceiptSigningTimestamp(entry);
+    const timestamp = getReceiptTimestamp(entry) || "";
     const recomputedHash = computeEntryHash({
       fileHash: entry.fileHash,
       modelName: entry.modelName,
@@ -1347,7 +1618,7 @@ export async function registerRoutes(
     });
 
     const signaturePayload = `${entry.entryHash}|${entry.fileHash}|${timestamp}`;
-    const signatureValid = verifySignature(signaturePayload, entry.signature, entry.publicKey);
+    const signatureValid = !!timestamp && verifySignature(signaturePayload, entry.signature, entry.publicKey);
 
     let prevEntry = null;
     if (entry.prevEntryHash) {
@@ -1357,6 +1628,7 @@ export async function registerRoutes(
       }
     }
 
+    const ledgerStatuses = await getReceiptLedgerStatuses([entry.id]);
     res.json({
       id: entry.id,
       fileName: entry.fileName,
@@ -1372,8 +1644,8 @@ export async function registerRoutes(
       prevEntry,
       modelName: entry.modelName,
       modelProvider: entry.modelProvider,
+      ...(ledgerStatuses.has(entry.id) ? { gitLedgerStatus: ledgerStatuses.get(entry.id) } : {}),
       createdAt: entry.createdAt,
-      signedAt: entry.signedAt,
     });
   });
 
@@ -1386,8 +1658,8 @@ export async function registerRoutes(
 
     let entry: any = null;
 
-    const idNum = /^\d+$/.test(q) ? Number(q) : NaN;
-    if (Number.isSafeInteger(idNum)) {
+    if (isReceiptIdQuery(q)) {
+      const idNum = Number(q);
       entry = await storage.getAttestation(idNum);
     }
 
@@ -1399,38 +1671,10 @@ export async function registerRoutes(
       return res.status(404).json({ message: "No attestation found for the given ID or hash" });
     }
 
-    const timestamp = getReceiptSigningTimestamp(entry);
-    const recomputedHash = computeEntryHash({
-      fileHash: entry.fileHash,
-      modelName: entry.modelName,
-      modelProvider: entry.modelProvider,
-      countryOfOrigin: entry.countryOfOrigin,
-      prevEntryHash: entry.prevEntryHash,
-      timestamp,
-    });
-
-    const signaturePayload = `${entry.entryHash}|${entry.fileHash}|${timestamp}`;
-    const signatureValid = verifySignature(signaturePayload, entry.signature, entry.publicKey);
-
+    const ledgerStatuses = await getReceiptLedgerStatuses([entry.id]);
     res.json({
-      id: entry.id,
-      fileName: entry.fileName,
-      filePath: entry.filePath,
-      fileHash: entry.fileHash,
-      entryHash: entry.entryHash,
-      prevEntryHash: entry.prevEntryHash,
-      signatureValid,
-      hashMatch: !!timestamp && recomputedHash === entry.entryHash,
-      complianceStatus: entry.complianceStatus,
-      detectedCountry: entry.detectedCountry,
-      countryOfOrigin: entry.countryOfOrigin,
-      modelName: entry.modelName,
-      modelProvider: entry.modelProvider,
-      signature: entry.signature,
-      publicKey: entry.publicKey,
-      receiptVersion: entry.receiptVersion,
-      createdAt: entry.createdAt,
-      signedAt: entry.signedAt,
+      ...toPublicReceipt(entry),
+      ...(ledgerStatuses.has(entry.id) ? { gitLedgerStatus: ledgerStatuses.get(entry.id) } : {}),
     });
   });
 
@@ -1485,17 +1729,21 @@ export async function registerRoutes(
     <rect width="280" height="20" fill="url(#s)"/>
   </g>
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="11">
-    <text x="80" y="14">ForgeProof | ${entry.modelProvider}</text>
+    <text x="80" y="14">ForgeProof | ${escapeMarkup(entry.modelProvider)}</text>
     <text x="220" y="14">${statusLabel}</text>
   </g>
 </svg>`;
     res.setHeader("Content-Type", "image/svg+xml");
+    res.setHeader("Content-Security-Policy", DOCUMENT_CSP);
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Cache-Control", "no-cache");
     res.send(svg);
   });
 
   app.get("/api/badge/repo/:repoName.svg", demoLimiter, async (req, res) => {
-    const repoName = decodeURIComponent(req.params.repoName as string);
+    // Express has already decoded route parameters; decoding twice breaks
+    // legitimate repository names containing percent signs.
+    const repoName = req.params.repoName as string;
     const all = await storage.getAllAttestationsOrdered();
     const repoAttestations = all.filter(a => a.filePath.startsWith(repoName) || a.filePath.includes(repoName));
 
@@ -1512,16 +1760,18 @@ export async function registerRoutes(
   </g>
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="11">
     <text x="70" y="14">ForgeProof</text>
-    <text x="220" y="14">${count} attestations${providers ? " | " + providers : ""}</text>
+    <text x="220" y="14">${count} attestations${providers ? " | " + escapeMarkup(providers) : ""}</text>
   </g>
 </svg>`;
     res.setHeader("Content-Type", "image/svg+xml");
+    res.setHeader("Content-Security-Policy", DOCUMENT_CSP);
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Cache-Control", "no-cache");
     res.send(svg);
   });
 
   // ─── OpenAPI Spec for GPT Actions ─────────────────
-  app.get("/api/openapi.json", uiLimiter, (_req, res) => {
+  app.get("/api/openapi.json", (_req, res) => {
     res.json({
       openapi: "3.1.0",
       info: {
@@ -1603,13 +1853,14 @@ export async function registerRoutes(
   });
 
   app.post("/api/mcp/tools", agentApiLimiter, async (req, res) => {
-    const { tool, arguments: args } = req.body ?? {};
+    let userId = await authenticateApiKey(req);
+    if (!userId) {
+      return res.status(401).json({ message: "Bearer API key required for MCP tool execution" });
+    }
+
+    const { tool, arguments: args } = req.body;
     if (!tool || typeof tool !== "string") {
       return res.status(400).json({ message: "Missing 'tool' field" });
-    }
-    const userId = await authenticateApiKey(req, mcpToolPermission(tool));
-    if (!userId) {
-      return res.status(401).json({ message: "Bearer API key with the required capability is required" });
     }
 
     try {
@@ -1629,17 +1880,16 @@ export async function registerRoutes(
 
     const isSystemData = entry.userId === "system" || entry.userId === "forgeproof-system" || entry.userId === "webhook";
     if (!isSystemData) {
-      if (!req.isAuthenticated || !req.isAuthenticated()) {
+      if (!sessionUserId(req)) {
         return res.status(401).send("Authentication required for non-public receipts");
       }
-      const user = req.user as any;
-      const userId = user?.claims?.sub || user?.id;
-      if (entry.userId !== userId) {
+      const userId = sessionUserId(req);
+      if (entry.userId !== userId && !(await storage.getAttestations(userId!)).some(r => r.id === entry.id)) {
         return res.status(403).send("Access denied");
       }
     }
 
-    const timestamp = getReceiptSigningTimestamp(entry);
+    const timestamp = getReceiptTimestamp(entry) || "";
     const recomputedHash = computeEntryHash({
       fileHash: entry.fileHash,
       modelName: entry.modelName,
@@ -1650,19 +1900,21 @@ export async function registerRoutes(
     });
 
     const signaturePayload = `${entry.entryHash}|${entry.fileHash}|${timestamp}`;
-    const signatureValid = verifySignature(signaturePayload, entry.signature, entry.publicKey);
+    const signatureValid = !!timestamp && verifySignature(signaturePayload, entry.signature, entry.publicKey);
     const hashMatch = !!timestamp && recomputedHash === entry.entryHash;
 
     const statusEmoji = entry.complianceStatus === "verified" ? "&#x2705;" : entry.complianceStatus === "mismatch" ? "&#x274C;" : "&#x2753;";
     const sigEmoji = signatureValid ? "&#x2705;" : "&#x274C;";
     const hashEmoji = hashMatch ? "&#x2705;" : "&#x274C;";
+    const sourceReference = parseSourceReference(entry.filePath);
+    const receiptArchiveUrl = entry.gitCommitUrl && /^https:\/\/github\.com\/[^?#\s]+$/.test(entry.gitCommitUrl) ? entry.gitCommitUrl : null;
 
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ForgeProof Attestation Certificate #${entry.id}</title>
+  <title>ForgeProof Attestation Certificate #${escapeMarkup(entry.id)}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: #f8fafc; color: #1e293b; padding: 40px; }
@@ -1695,70 +1947,238 @@ export async function registerRoutes(
     <div class="header">
       <div class="logo-text">ForgeProof</div>
       <div class="subtitle">Code Provenance Attestation Certificate</div>
-      <div class="cert-id">Receipt #${entry.id} &middot; Version ${entry.receiptVersion || 'v1'}</div>
+      <div class="cert-id">Receipt #${escapeMarkup(entry.id)} &middot; Version ${escapeMarkup(entry.receiptVersion || 'v1')}</div>
     </div>
 
     <div class="status-row">
       <div class="status-badge ${signatureValid ? 'verified' : 'failed'}">${sigEmoji} Signature ${signatureValid ? 'Valid' : 'Invalid'}</div>
       <div class="status-badge ${hashMatch ? 'verified' : 'failed'}">${hashEmoji} Hash ${hashMatch ? 'Verified' : 'Mismatch'}</div>
-      <div class="status-badge ${entry.complianceStatus === 'verified' ? 'verified' : entry.complianceStatus === 'mismatch' ? 'failed' : 'pending'}">${statusEmoji} Geo ${entry.complianceStatus || 'Unverified'}</div>
+      <div class="status-badge ${entry.complianceStatus === 'verified' ? 'verified' : entry.complianceStatus === 'mismatch' ? 'failed' : 'pending'}">${statusEmoji} Geo ${escapeMarkup(entry.complianceStatus || 'Unverified')}</div>
     </div>
 
     <div class="section">
       <div class="section-title">File Information</div>
-      <div class="field"><span class="field-label">File Name</span><span class="field-value">${entry.fileName}</span></div>
-      <div class="field"><span class="field-label">File Path</span><span class="field-value">${entry.filePath}</span></div>
-      <div class="field"><span class="field-label">File Hash</span><span class="field-value hash">${entry.fileHash}</span></div>
+      <div class="field"><span class="field-label">File Name</span><span class="field-value">${escapeMarkup(entry.fileName)}</span></div>
+      <div class="field"><span class="field-label">File Path</span><span class="field-value">${escapeMarkup(entry.filePath)}</span></div>
+      <div class="field"><span class="field-label">File Hash</span><span class="field-value hash">${escapeMarkup(entry.fileHash)}</span></div>
     </div>
 
     <div class="section">
-      <div class="section-title">AI Model Information</div>
-      <div class="field"><span class="field-label">Model Name</span><span class="field-value">${entry.modelName}</span></div>
-      <div class="field"><span class="field-label">Model Provider</span><span class="field-value">${entry.modelProvider}</span></div>
+      <div class="section-title">Source and receipt archive — separate references</div>
+      <div class="field"><span class="field-label">Original source commit</span><span class="field-value">${sourceReference ? `<a href="${escapeMarkup(sourceReference.commitUrl)}">${escapeMarkup(sourceReference.commit)}</a>` : "No immutable source commit reference recorded"}</span></div>
+      <div class="field"><span class="field-label">Optional receipt archive</span><span class="field-value">${receiptArchiveUrl ? `<a href="${escapeMarkup(receiptArchiveUrl)}">Receipt export commit</a>` : "No optional receipt export commit attached; this does not indicate missing source or Git ledger evidence"}</span></div>
     </div>
 
     <div class="section">
-      <div class="section-title">Geographic Compliance</div>
-      <div class="field"><span class="field-label">Declared Country</span><span class="field-value">${entry.countryOfOrigin}</span></div>
-      <div class="field"><span class="field-label">Detected Country</span><span class="field-value">${entry.detectedCountry || 'Not detected'}</span></div>
-      <div class="field"><span class="field-label">Compliance Status</span><span class="field-value">${(entry.complianceStatus || 'unverified').charAt(0).toUpperCase() + (entry.complianceStatus || 'unverified').slice(1)}</span></div>
+      <div class="section-title">Original signed model declarations — not observed authorship</div>
+      <div class="field"><span class="field-label">Model Name</span><span class="field-value">${escapeMarkup(entry.modelName)}</span></div>
+      <div class="field"><span class="field-label">Model Provider</span><span class="field-value">${escapeMarkup(entry.modelProvider)}</span></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Geographic claims — processing region UNKNOWN</div>
+      <div class="field"><span class="field-label">Declared Country</span><span class="field-value">${escapeMarkup(entry.countryOfOrigin)}</span></div>
+      <div class="field"><span class="field-label">Request-origin country (not provider processing region)</span><span class="field-value">${escapeMarkup(entry.detectedCountry || 'Not detected')}</span></div>
+      <div class="field"><span class="field-label">Compliance Status</span><span class="field-value">${escapeMarkup((entry.complianceStatus || 'unverified').charAt(0).toUpperCase() + (entry.complianceStatus || 'unverified').slice(1))}</span></div>
     </div>
 
     <div class="section">
       <div class="section-title">Hash Chain</div>
-      <div class="field"><span class="field-label">Entry Hash</span><span class="field-value hash">${entry.entryHash}</span></div>
-      <div class="field"><span class="field-label">Previous Hash</span><span class="field-value hash">${entry.prevEntryHash || 'Genesis (first entry)'}</span></div>
-      <div class="field"><span class="field-label">Timestamp</span><span class="field-value">${timestamp}</span></div>
+      <div class="field"><span class="field-label">Entry Hash</span><span class="field-value hash">${escapeMarkup(entry.entryHash)}</span></div>
+      <div class="field"><span class="field-label">Previous Hash</span><span class="field-value hash">${escapeMarkup(entry.prevEntryHash || 'Genesis (first entry)')}</span></div>
+      <div class="field"><span class="field-label">Timestamp</span><span class="field-value">${escapeMarkup(timestamp)}</span></div>
     </div>
 
     <div class="sig-block">
       <div class="sig-label">Ed25519 Digital Signature</div>
-      <div class="sig-value">${entry.signature}</div>
+      <div class="sig-value">${escapeMarkup(entry.signature)}</div>
     </div>
     <div class="sig-block" style="margin-top: 8px;">
       <div class="sig-label">Public Key</div>
-      <div class="sig-value">${entry.publicKey}</div>
+      <div class="sig-value">${escapeMarkup(entry.publicKey)}</div>
     </div>
 
     <div class="footer">
+      <div class="footer-text">Claim boundaries: a valid signature binds the recorded hash and timestamp. It does not independently prove AI authorship, provider processing location, or a security audit of every file. A manifest inventory is one signed receipt, not individual file signatures. SHA-256 ledger ordering is distinct from parent/child attestation lineage. Source references and optional receipt-archive commits are separate evidence.</div>
       <div class="footer-text">This attestation was cryptographically signed using Ed25519 and is part of a SHA-256 hash chain.</div>
-      <div class="footer-text" style="margin-top: 4px;">Verify at: /lookup?q=${entry.id}</div>
+      <div class="footer-text" style="margin-top: 4px;">Verify at: /lookup?q=${escapeMarkup(entry.id)}</div>
     </div>
   </div>
 </body>
 </html>`;
   
     res.setHeader("Content-Type", "text/html");
+    res.setHeader("Content-Security-Policy", DOCUMENT_CSP);
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.send(html);
   });
 
-  // Retired unsafe demo/admin endpoints. Never allow unauthenticated data-destructive operations.
-  app.get("/api/admin/commit-health", uiLimiter, (_req, res) => {
-    res.status(410).json({ message: "Administrative endpoint unavailable" });
+  // ── Stripe sandbox readiness and reconciliation ──
+  // These endpoints are deliberately separate from normal billing traffic.
+  // Reconciliation is operator-confirmed and never runs during startup.
+  app.get(
+    "/api/admin/stripe/readiness",
+    isAuthenticated,
+    isTrustedAdmin,
+    async (_req, res) => {
+      try {
+        return res.json(await getStripeReadiness());
+      } catch {
+        // Keep the response shape stable while avoiding provider/credential
+        // details in an admin-facing error response.
+        return res.status(503).json({
+          expectedAccountId: EXPECTED_STRIPE_ACCOUNT_ID,
+          account: null,
+          ready: false,
+          checks: [{
+            key: "readiness",
+            label: "Stripe readiness",
+            status: "error",
+            detail: "Stripe readiness could not be completed; no changes were made.",
+          }],
+          canReconcile: false,
+        });
+      }
+    },
+  );
+
+  app.post(
+    "/api/admin/stripe/reconcile",
+    isAuthenticated,
+    isTrustedAdmin,
+    async (req, res) => {
+      if (!hasAllowedAdminOrigin(req)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const parsed = stripeReconciliationBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          message: "preservationConfirmed and expectedAccountId are required.",
+        });
+      }
+      if (parsed.data.expectedAccountId !== EXPECTED_STRIPE_ACCOUNT_ID) {
+        return res.status(400).json({
+          message: "The expected Stripe account does not match the pinned account.",
+        });
+      }
+
+      try {
+        // This read is intentionally before any lock or provider mutation.
+        // It makes account mismatch and readiness gates explicit and
+        // guarantees those requests perform no writes.
+        const readiness = await getStripeReadiness();
+        if (!readiness.canReconcile) {
+          return res.status(409).json({
+            ...readiness,
+            success: false,
+            reconciliation: {
+              status: "blocked",
+              localSuccess: false,
+              remoteStatus: "unverified",
+              operations: [{
+                key: "readiness",
+                status: "blocked",
+                detail: "Readiness gates are not satisfied; no provider mutation was attempted.",
+              }],
+            },
+          });
+        }
+
+        const report = await reconcileStripe();
+        return res.status(report.reconciliation.status === "partial" ? 207 : 200).json(report);
+      } catch {
+        return res.status(503).json({
+          expectedAccountId: EXPECTED_STRIPE_ACCOUNT_ID,
+          account: null,
+          ready: false,
+          checks: [{
+            key: "reconciliation",
+            label: "Stripe reconciliation",
+            status: "error",
+            detail: "Stripe reconciliation could not be completed; retry after reviewing readiness.",
+          }],
+          canReconcile: false,
+          success: false,
+          reconciliation: {
+            status: "blocked",
+            localSuccess: false,
+            remoteStatus: "unverified",
+            operations: [{
+              key: "reconciliation",
+              status: "error",
+              detail: "No provider mutation result is available; review readiness before retrying.",
+            }],
+          },
+        });
+      }
+    },
+  );
+
+  // Commit URL health check — verifies seed gitCommitUrls are still reachable.
+  // Results are cached server-side so public demo traffic never triggers live
+  // outbound GitHub checks more than once per TTL, and concurrent requests
+  // share a single in-flight check.
+  const COMMIT_HEALTH_TTL_MS = 15 * 60 * 1000;
+  let commitHealthCache: { report: any; expiresAt: number } | null = null;
+  let commitHealthInFlight: Promise<any> | null = null;
+
+  app.get("/api/admin/commit-health", demoLimiter, async (_req, res) => {
+    try {
+      let report: any;
+      if (commitHealthCache && commitHealthCache.expiresAt > Date.now()) {
+        report = commitHealthCache.report;
+      } else {
+        if (!commitHealthInFlight) {
+          commitHealthInFlight = (async () => {
+            const { checkSeedCommitUrls } = await import("./commitHealthCheck");
+            const fresh = await checkSeedCommitUrls();
+            commitHealthCache = { report: fresh, expiresAt: Date.now() + COMMIT_HEALTH_TTL_MS };
+            return fresh;
+          })().finally(() => {
+            commitHealthInFlight = null;
+          });
+        }
+        report = await commitHealthInFlight;
+      }
+      const statusCode = report.broken > 0 ? 207 : 200;
+      res.status(statusCode).json(report);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
-  app.post("/api/admin/reseed", uiLimiter, (_req, res) => {
-    res.status(410).json({ message: "Administrative endpoint unavailable" });
+  // Destructive demo maintenance is never available in production.
+  app.post("/api/admin/reseed", isAuthenticated, isTrustedAdmin, publicApiLimiter, async (req, res) => {
+    if (process.env.NODE_ENV !== "development" && process.env.NODE_ENV !== "test") {
+      return res.status(403).json({ message: "Reseeding is disabled in this environment" });
+    }
+    if (!hasAllowedAdminOrigin(req)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    try {
+      await storage.clearAllAttestations();
+      const { seedDatabase } = await import("./seed");
+      await seedDatabase();
+      res.json({ message: "Database re-seeded successfully" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ── PDF Downloads ──
+  app.get("/downloads/forgeproof-technical-overview.pdf", (_req, res) => {
+    const filePath = path.resolve(process.cwd(), "attached_assets/ForgeProof_Technical_Overview.pdf");
+    res.download(filePath, "ForgeProof_Technical_Overview.pdf", (err) => {
+      if (err && !res.headersSent) res.status(404).json({ error: "File not found" });
+    });
+  });
+
+  app.get("/downloads/forgeproof-sales-sheet.pdf", (_req, res) => {
+    const filePath = path.resolve(process.cwd(), "attached_assets/ForgeProof_Sales_Sheet.pdf");
+    res.download(filePath, "ForgeProof_Sales_Sheet.pdf", (err) => {
+      if (err && !res.headersSent) res.status(404).json({ error: "File not found" });
+    });
   });
 
   return httpServer;

@@ -2,8 +2,17 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { clerkMiddleware } from "@clerk/express";
+import { publishableKeyFromHost } from "@clerk/shared/keys";
+import { CLERK_PROXY_PATH, clerkProxyMiddleware, getClerkProxyHost } from "./middlewares/clerkProxyMiddleware";
+import { startReceiptOutboxWorker } from "./receiptOutbox";
+import { requestLogLine } from "./requestLog";
+import { hasApplicationStorage, requestStorageScope } from "./storageBackend";
+import { initializeApplicationStorage } from "./git-store/applicationRuntime";
 
 const app = express();
+app.set("trust proxy", 1);
+app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 const httpServer = createServer(app);
 
 declare module "http" {
@@ -23,7 +32,8 @@ app.post(
     try {
       const sig = Array.isArray(signature) ? signature[0] : signature;
       const { WebhookHandlers } = await import("./webhookHandlers");
-      await WebhookHandlers.processWebhook(req.body as Buffer, sig);
+      const owned = await WebhookHandlers.processWebhook(req.body as Buffer, sig);
+      if (!owned) return res.status(200).json({ received: true, ignored: true });
 
       try {
         const event = JSON.parse((req.body as Buffer).toString("utf8"));
@@ -51,6 +61,14 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+app.use(
+  clerkMiddleware((req) => ({
+    publishableKey: publishableKeyFromHost(
+      getClerkProxyHost(req) ?? "",
+      process.env.CLERK_PUBLISHABLE_KEY,
+    ),
+  })),
+);
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -66,23 +84,11 @@ export function log(message: string, source = "express") {
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
 
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      log(logLine);
+      log(requestLogLine(req, res.statusCode, duration));
     }
   });
 
@@ -90,9 +96,11 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  await initializeApplicationStorage();
+  app.use((_req, _res, next) => requestStorageScope(next));
   await registerRoutes(httpServer, app);
 
-  try {
+  if (!hasApplicationStorage()) try {
     const { seedDatabase } = await import("./seed");
     await seedDatabase();
   } catch (e) {
@@ -100,6 +108,7 @@ app.use((req, res, next) => {
   }
 
   (async () => {
+    if (hasApplicationStorage()) return;
     try {
       const { runCommitHealthCheck } = await import("./commitHealthCheck");
       await runCommitHealthCheck();
@@ -113,16 +122,44 @@ app.use((req, res, next) => {
 
   (async () => {
     try {
-      const { runMigrations } = await import("stripe-replit-sync");
-      await runMigrations({ databaseUrl: process.env.DATABASE_URL! });
-      const { getStripeSync } = await import("./stripeClient");
-      const stripeSync = await getStripeSync();
-      const webhookBaseUrl = `https://${process.env.REPLIT_DOMAINS?.split(",")[0]}`;
-      await stripeSync.findOrCreateManagedWebhook(`${webhookBaseUrl}/api/stripe/webhook`);
-      await stripeSync.syncBackfill();
-      log("Stripe initialized and synced", "stripe");
+      const { flushEmailQueue } = await import("./email");
+      const ONE_MINUTE = 60 * 1000;
+      setInterval(() => {
+        flushEmailQueue().catch((e) => console.error("Email queue flush error:", e));
+      }, ONE_MINUTE);
     } catch (e) {
-      console.error("Stripe init error (billing features unavailable):", e);
+      console.error("Email queue worker setup error:", e);
+    }
+  })();
+
+  // Stripe sync schema migrations are local database setup only.  Provider
+  // inspection, webhook changes, and catalog synchronization are deliberately
+  // operator-triggered through the hardened admin reconciliation endpoint.
+  (async () => {
+    if (hasApplicationStorage()) return;
+    try {
+      const { runMigrations } = await import("stripe-replit-sync");
+      const { pool } = await import("./db");
+      await runMigrations({ databaseUrl: process.env.DATABASE_URL! });
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS stripe."_forgeproof_webhook_intents" (
+          account_id text NOT NULL,
+          environment text NOT NULL,
+          url text NOT NULL,
+          idempotency_key text NOT NULL,
+          request_params jsonb NOT NULL,
+          status text NOT NULL DEFAULT 'pending',
+          stripe_endpoint_id text,
+          secret_stored boolean NOT NULL DEFAULT false,
+          created_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
+          updated_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
+          PRIMARY KEY (account_id, environment),
+          UNIQUE (account_id, url)
+        )
+      `);
+      log("Stripe sync schema initialized", "stripe");
+    } catch (e) {
+      console.error("Stripe schema migration error (billing features unavailable):", e);
     }
   })();
 
@@ -157,11 +194,12 @@ app.use((req, res, next) => {
   httpServer.listen(
     {
       port,
-      host: "0.0.0.0",
+      host: process.env.FORGEPROOF_ISOLATED_STAGING === "true" ? "127.0.0.1" : "0.0.0.0",
       reusePort: true,
     },
     () => {
       log(`serving on port ${port}`);
+      if (!hasApplicationStorage()) startReceiptOutboxWorker();
     },
   );
 })();

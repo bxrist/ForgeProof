@@ -38,7 +38,7 @@ const terms: Term[] = [
     plainLanguage: "A signed statement that something happened. Like a notarized document, but for code — cryptographic proof that a specific AI model generated a specific file at a specific time.",
     technical: "A digitally signed JSON receipt containing file hash, model identity, provider, timestamp, geographic origin, and a link to the previous entry in the hash chain. Signed with Ed25519.",
     icon: FileCheck,
-    example: "\"GPT-4 generated auth.ts on Feb 21, 2026 from a US-based endpoint\" — signed and hash-chained.",
+    example: "\"GPT-5 generated auth.ts on Feb 21, 2026 from a US-based endpoint\" — signed and hash-chained.",
   },
   {
     term: "Provenance",
@@ -64,12 +64,12 @@ const terms: Term[] = [
     plainLanguage: "The family tree of a piece of code. Which model created it, which model reviewed it, which model fixed the issues — all connected in sequence.",
     technical: "The sequence of attestation receipts associated with a single artifact across its lifecycle: origin attestation, security audit attestation, remediation attestation. Each receipt links to its predecessor via the hash chain.",
     icon: Layers,
-    example: "File auth.ts: Origin (GPT-4) → Audit (Claude) → Remediation (Claude) — three linked attestations.",
+    example: "File auth.ts: Origin (GPT-5) → Audit (Claude Sonnet 5) → Remediation (Claude Sonnet 5) — three linked attestations.",
   },
   {
     term: "Model Identity",
-    plainLanguage: "The specific AI model that generated code — not just \"OpenAI\" but exactly \"GPT-4-turbo\" or \"claude-sonnet-4\". This is what gets recorded in every attestation.",
-    technical: "Recorded as two fields: model_name (e.g., gpt-4-turbo) and model_provider (e.g., OpenAI). Used for analytics, compliance reporting, and provider separation enforcement in multi-model attestation.",
+    plainLanguage: "The specific AI model that generated code — not just \"OpenAI\" but exactly \"gpt-5.6\" or \"claude-sonnet-5\". This is what gets recorded in every attestation.",
+    technical: "Recorded as two fields: model_name (e.g., gpt-5.6) and model_provider (e.g., OpenAI). Used for analytics, compliance reporting, and provider separation enforcement in multi-model attestation.",
     icon: Cpu,
   },
   {

@@ -1,17 +1,19 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useParams } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useAuth } from "@/hooks/use-auth";
+import { useUser } from "@clerk/react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import type { AttestationReceipt, Repository } from "@shared/schema";
 import { ForgeProofLogo } from "@/components/ForgeProofLogo";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { trackEvent } from "@/lib/analytics";
 import {
   ArrowLeft,
   ArrowRight,
@@ -35,9 +37,30 @@ import {
   Loader2,
 } from "lucide-react";
 import { SEO } from "@/components/SEO";
+import { SourceManifestPanel } from "@/components/SourceManifestPanel";
+import { RuntimeVerificationChecklist } from "@/components/RuntimeVerificationChecklist";
+import { ReceiptClaims } from "@/components/ReceiptClaims";
+import { useAppPrincipal } from "@/hooks/use-provenance";
+import { receiptPresentation } from "@shared/receiptPresentation";
+import { redactMetadata } from "@/lib/provenance";
 
 type AttestationWithChildren = AttestationReceipt & {
   childAttestations?: AttestationReceipt[];
+  gitLedgerStatus?: "not_configured" | "historical_boundary" | "in_git" | "pending" | "blocked" | "not_anchored";
+  evidenceVisibility?: {
+    metadata: "available" | "not_recorded" | "protected_unavailable";
+    auditDetails: "available" | "not_recorded" | "protected_unavailable";
+  };
+};
+
+type LineageResponse = {
+  filePath: string;
+  logicalFilePath: string;
+  repositoryId: number | null;
+  declaredModelCount: number;
+  observedModelCount: number;
+  distinctModels: string[];
+  lineage: AttestationReceipt[];
 };
 
 function getTypeBadge(type: string | null | undefined) {
@@ -112,11 +135,19 @@ function DetailRow({ label, value, icon: Icon, mono = false }: { label: string; 
 
 export default function AttestationDetailPage() {
   const params = useParams<{ id: string }>();
-  const { user, isLoading: authLoading } = useAuth();
+  const { user, isLoaded } = useUser();
+  const authLoading = !isLoaded;
+  const { data: principal } = useAppPrincipal();
+  const userId = principal?.id;
   const { toast } = useToast();
 
-  const { data: receipt, isLoading } = useQuery<AttestationWithChildren>({
+  const { data: receipt, isLoading, isError, refetch } = useQuery<AttestationWithChildren>({
     queryKey: ["/api/attestations", params.id],
+    enabled: !!params.id,
+  });
+
+  const { data: lineageData } = useQuery<LineageResponse>({
+    queryKey: ["/api/attestations", params.id, "lineage"],
     enabled: !!params.id,
   });
 
@@ -130,22 +161,112 @@ export default function AttestationDetailPage() {
     enabled: !!user && !!githubStatus?.connected,
   });
 
-  const [selectedRepoId, setSelectedRepoId] = useState<string>("__first__");
+  const { data: userPrefs } = useQuery<{ defaultRepoId: string | null; detailRepoId: string | null; lastActiveTab: string | null }>({
+    queryKey: ["/api/preferences"],
+    enabled: !!user,
+  });
+
+  const savePreferenceMutation = useMutation({
+    mutationFn: async (detailRepoId: string | null) => {
+      const res = await apiRequest("PATCH", "/api/preferences", { detailRepoId });
+      return res.json();
+    },
+  });
+
+  const [selectedRepoId, setSelectedRepoId] = useState<string>(
+    () => localStorage.getItem("forgeproof.detailRepoId") ?? "__first__"
+  );
+  const serverPrefApplied = useRef(false);
+  const [showCommitMessageInput, setShowCommitMessageInput] = useState(false);
+  const [customCommitMessage, setCustomCommitMessage] = useState("");
+  const inFlightCommitIds = useRef<Set<number>>(new Set());
+
+  // Combined reconciliation + validation effect.
+  //
+  // Ordering guarantee: we never touch localStorage or the server preference
+  // until userPrefs has loaded, so repos winning the request race cannot
+  // clobber the true server value.
+  //
+  // The effect depends on both `userPrefs` and `repos` so that:
+  //   • If prefs load first, we apply the server value; when repos arrive
+  //     next the effect re-runs and validates the now-applied value.
+  //   • If repos load first the early-return keeps us idle; when prefs
+  //     arrive the effect runs once with both values present and validates
+  //     immediately in the same execution.
+  useEffect(() => {
+    if (!userPrefs) return; // Wait for server preference before acting
+
+    const isFirstLoad = !serverPrefApplied.current;
+    if (isFirstLoad) serverPrefApplied.current = true;
+
+    // On first load the server value is authoritative; afterwards the
+    // current selection (possibly changed by the user) is authoritative.
+    const target = isFirstLoad
+      ? (userPrefs.detailRepoId ?? "__first__")
+      : selectedRepoId;
+
+    // Validate against the repo list when it is available.
+    if (repos && target !== "__first__" && !repos.some((r) => String(r.id) === target)) {
+      setSelectedRepoId("__first__");
+      localStorage.removeItem("forgeproof.detailRepoId");
+      savePreferenceMutation.mutate(null);
+      return;
+    }
+
+    // Apply the authoritative value to state and localStorage.
+    setSelectedRepoId(target);
+    if (target === "__first__") {
+      localStorage.removeItem("forgeproof.detailRepoId");
+    } else {
+      localStorage.setItem("forgeproof.detailRepoId", target);
+    }
+  }, [userPrefs, repos]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleRepoChange = (val: string) => {
+    setSelectedRepoId(val);
+    if (val === "__first__") {
+      localStorage.removeItem("forgeproof.detailRepoId");
+      savePreferenceMutation.mutate(null);
+    } else {
+      localStorage.setItem("forgeproof.detailRepoId", val);
+      savePreferenceMutation.mutate(val);
+    }
+  };
 
   const gitCommitMutation = useMutation({
-    mutationFn: async ({ id, repositoryId }: { id: number; repositoryId?: number }) => {
-      const body = repositoryId ? { repositoryId } : {};
+    mutationFn: async ({ id, repositoryId, commitMessage }: { id: number; repositoryId?: number; commitMessage?: string }) => {
+      const body: { repositoryId?: number; commitMessage?: string } = {};
+      if (repositoryId) body.repositoryId = repositoryId;
+      if (commitMessage) body.commitMessage = commitMessage;
       const res = await apiRequest("POST", `/api/attestations/${id}/git-commit`, body);
       return res.json() as Promise<{ gitCommitUrl: string }>;
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/attestations", params.id] });
+      trackEvent("receipt_committed_to_git", {
+        location: "attestation_detail",
+        custom_message: Boolean(variables.commitMessage),
+      });
       toast({ title: "Receipt committed to Git" });
     },
     onError: (error: Error) => {
       toast({ title: "Git commit failed", description: error.message, variant: "destructive" });
     },
+    onSettled: (_data, _error, variables) => {
+      inFlightCommitIds.current.delete(variables.id);
+    },
   });
+
+  const handleCommitToGit = (id: number) => {
+    if (inFlightCommitIds.current.has(id)) return;
+    inFlightCommitIds.current.add(id);
+    const trimmed = customCommitMessage.trim();
+    gitCommitMutation.mutate({
+      id,
+      repositoryId: selectedRepoId !== "__first__" ? Number(selectedRepoId) : undefined,
+      commitMessage: showCommitMessageInput && trimmed ? trimmed : undefined,
+    });
+  };
 
   const handleDownload = () => {
     if (!receipt) return;
@@ -163,7 +284,7 @@ export default function AttestationDetailPage() {
       public_key: receipt.publicKey,
       entry_hash: receipt.entryHash,
       prev_entry_hash: receipt.prevEntryHash,
-      metadata: receipt.metadata,
+      metadata: redactMetadata(receipt.metadata),
     };
     const blob = new Blob([JSON.stringify(receiptData, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -202,8 +323,9 @@ export default function AttestationDetailPage() {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center">
         <FileCheck className="w-12 h-12 text-muted-foreground mb-4" />
-        <h2 className="font-display text-xl font-semibold mb-2">Attestation Not Found</h2>
-        <p className="text-sm text-muted-foreground mb-4">This receipt doesn't exist or you don't have access.</p>
+        <h2 className="font-display text-xl font-semibold mb-2">{isError ? "Receipt unavailable" : "Attestation Not Found"}</h2>
+        <p className="text-sm text-muted-foreground mb-4">This receipt could not be retrieved, doesn't exist, or you don't have access. No verification result is inferred.</p>
+        {isError && <Button variant="outline" className="mb-3" onClick={() => refetch()}>Retry receipt request</Button>}
         <Link href="/dashboard">
           <Button variant="outline">
             <ArrowLeft className="w-4 h-4 mr-2" />
@@ -265,8 +387,7 @@ export default function AttestationDetailPage() {
             </div>
             <div className="flex items-center gap-2">
               <Badge variant="secondary">
-                <CheckCircle2 className="w-3 h-3 mr-1" />
-                Verified
+                Signed receipt
               </Badge>
               <Badge variant="outline">{receipt.receiptVersion}</Badge>
             </div>
@@ -276,31 +397,49 @@ export default function AttestationDetailPage() {
             <div className="flex items-center gap-3 p-3 rounded-md bg-muted/50">
               <Cpu className="w-5 h-5 text-primary" />
               <div>
-                <div className="text-xs text-muted-foreground">Model</div>
+                <div className="text-xs text-muted-foreground">Declared model</div>
                 <div className="text-sm font-medium">{receipt.modelName}</div>
               </div>
             </div>
             <div className="flex items-center gap-3 p-3 rounded-md bg-muted/50">
               <Building2 className="w-5 h-5 text-primary" />
               <div>
-                <div className="text-xs text-muted-foreground">Provider</div>
+                <div className="text-xs text-muted-foreground">Declared provider</div>
                 <div className="text-sm font-medium">{receipt.modelProvider}</div>
               </div>
             </div>
             <div className="flex items-center gap-3 p-3 rounded-md bg-muted/50">
               <MapPin className="w-5 h-5 text-primary" />
               <div>
-                <div className="text-xs text-muted-foreground">Origin</div>
+                <div className="text-xs text-muted-foreground">Claimed country</div>
                 <div className="text-sm font-medium">{receipt.countryOfOrigin}</div>
               </div>
             </div>
           </div>
+          <div className="mt-4 pt-4 border-t border-border"><ReceiptClaims receipt={receipt} /></div>
         </Card>
 
+        <p className="text-xs text-muted-foreground">A certificate proves the integrity of signed content when its hash and signature verify. It does not prove AI authorship, execution location, compliance, or a per-file security audit. UNKNOWN is not a pass.</p>
+        <RuntimeVerificationChecklist ids={[receipt.id]} />
+        <SourceManifestPanel key={receipt.id} id={String(receipt.id)} filePath={receipt.filePath} />
         <Card className="p-6" data-testid="card-git-provenance">
+          <div className="mb-4 space-y-1">
+            <h3 className="font-semibold text-sm">Operational Git ledger</h3>
+            <p className={`text-sm ${receipt.gitLedgerStatus === "in_git" ? "text-green-700 dark:text-green-400" : "text-muted-foreground"}`}>
+              {({
+                not_configured: "Ledger sync not enabled",
+                historical_boundary: "Before ledger activation",
+                in_git: "Recorded in Git ledger",
+                pending: "Git ledger sync pending",
+                blocked: "Git ledger sync blocked",
+                not_anchored: "Not Git-anchored",
+              } as const)[receipt.gitLedgerStatus ?? "not_configured"]}
+            </p>
+            <p className="text-xs text-muted-foreground">Operational ledger delivery is separate from the optional receipt export below. Neither establishes AI authorship.</p>
+          </div>
           <h3 className="font-semibold text-sm mb-4 flex items-center gap-2">
             <GitCommit className="w-4 h-4 text-primary" />
-            Git Provenance
+            Optional Git receipt archive
           </h3>
           {receipt.gitCommitUrl ? (
             <a
@@ -317,7 +456,7 @@ export default function AttestationDetailPage() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <Badge className="text-xs bg-green-600 hover:bg-green-600 text-white border-0 no-default-hover-elevate no-default-active-elevate" data-testid="badge-in-git">
                     <CheckCircle2 className="w-3 h-3 mr-1" />
-                    In Git
+                    Receipt archive attached
                   </Badge>
                   <span className="text-xs font-mono text-muted-foreground" data-testid="text-commit-sha">
                     {receipt.gitCommitUrl?.split("/").pop()?.slice(0, 7)}
@@ -330,25 +469,44 @@ export default function AttestationDetailPage() {
               </div>
               <ExternalLink className="w-4 h-4 text-green-600 dark:text-green-400 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" />
             </a>
-          ) : user && receipt.userId === user.id ? (
+          ) : user && receipt.userId === userId ? (
             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 rounded-lg border border-dashed border-border bg-muted/30">
               <div className="w-9 h-9 rounded-full bg-muted flex items-center justify-center shrink-0">
                 <GitCommit className="w-4 h-4 text-muted-foreground" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium" data-testid="text-not-in-git">Not yet committed to Git</p>
+                <p className="text-sm font-medium" data-testid="text-not-in-git">Optional receipt archive absent</p>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {githubStatus?.connected
-                    ? "Commit this receipt to your GitHub repository for permanent off-platform provenance."
+                     ? "Optionally archive this receipt in GitHub. This is not the original source commit or a prerequisite for signature verification."
                     : "Connect GitHub in the dashboard to commit this receipt to a repository."}
                 </p>
               </div>
               {githubStatus?.connected ? (
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex flex-col items-stretch sm:items-end gap-2 w-full sm:w-auto">
+                  {showCommitMessageInput && (
+                    <Input
+                      value={customCommitMessage}
+                      onChange={(e) => setCustomCommitMessage(e.target.value)}
+                      placeholder="Commit message"
+                      className="h-8 text-xs w-full sm:w-[320px]"
+                      data-testid="input-commit-message"
+                    />
+                  )}
+                  <div className="flex items-center gap-2 flex-wrap">
+                  {repos && repos.length === 1 && (
+                    <span
+                      className="flex items-center gap-0.5 text-xs text-muted-foreground/70 whitespace-nowrap"
+                      data-testid="label-commit-target"
+                    >
+                      <ArrowRight className="w-3 h-3" />
+                      {repos[0].fullName}
+                    </span>
+                  )}
                   {repos && repos.length > 1 && (
                     <Select
                       value={selectedRepoId}
-                      onValueChange={setSelectedRepoId}
+                      onValueChange={handleRepoChange}
                     >
                       <SelectTrigger className="h-8 text-xs w-[160px]" data-testid="select-commit-repo">
                         <SelectValue placeholder="Select repository" />
@@ -361,22 +519,38 @@ export default function AttestationDetailPage() {
                       </SelectContent>
                     </Select>
                   )}
-                  <Button
-                    size="sm"
-                    onClick={() => gitCommitMutation.mutate({
-                      id: receipt.id,
-                      repositoryId: selectedRepoId !== "__first__" ? Number(selectedRepoId) : undefined,
-                    })}
-                    disabled={gitCommitMutation.isPending}
-                    data-testid="button-commit-to-git"
+                    <Button
+                      size="sm"
+                      onClick={() => handleCommitToGit(receipt.id)}
+                      disabled={gitCommitMutation.isPending}
+                      data-testid="button-commit-to-git"
+                    >
+                      {gitCommitMutation.isPending ? (
+                        <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                      ) : (
+                        <GitCommit className="w-3.5 h-3.5 mr-1.5" />
+                      )}
+                      Commit to Git
+                    </Button>
+                  </div>
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 self-start sm:self-end"
+                    onClick={() => {
+                      setShowCommitMessageInput((prev) => {
+                        const next = !prev;
+                        if (next && !customCommitMessage) {
+                          setCustomCommitMessage(
+                            `chore: ForgeProof attestation ${receipt.entryHash.slice(0, 8)} — ${receipt.modelProvider}/${receipt.modelName}`
+                          );
+                        }
+                        return next;
+                      });
+                    }}
+                    data-testid="button-toggle-commit-message"
                   >
-                    {gitCommitMutation.isPending ? (
-                      <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                    ) : (
-                      <GitCommit className="w-3.5 h-3.5 mr-1.5" />
-                    )}
-                    Commit to Git
-                  </Button>
+                    {showCommitMessageInput ? "Use auto-generated message" : "Customize commit message"}
+                  </button>
                 </div>
               ) : (
                 <Link href="/dashboard">
@@ -387,7 +561,7 @@ export default function AttestationDetailPage() {
               )}
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground" data-testid="text-not-in-git-readonly">This receipt has not been committed to a Git repository.</p>
+            <p className="text-sm text-muted-foreground" data-testid="text-not-in-git-readonly">Optional receipt archive absent. Original source evidence, if available, is shown separately above.</p>
           )}
         </Card>
 
@@ -397,9 +571,13 @@ export default function AttestationDetailPage() {
             Cryptographic Details
           </h3>
           <div className="divide-y divide-border">
+            <DetailRow label="Receipt ID" value={String(receipt.id)} />
+            <DetailRow label="Issuer principal" value={receipt.userId} mono />
+            <Link href="/verify"><Button variant="outline" size="sm">Verify ledger signatures and chain</Button></Link>
             <DetailRow label="File Hash" value={receipt.fileHash} icon={Hash} mono />
             <DetailRow label="Entry Hash" value={receipt.entryHash} icon={Hash} mono />
-            <DetailRow label="Previous Hash" value={receipt.prevEntryHash || "Genesis (no previous entry)"} icon={Link2} mono />
+            <DetailRow label="Ledger prevEntryHash" value={receipt.prevEntryHash || "Genesis (no previous ledger entry)"} icon={Link2} mono />
+            <p className="text-xs text-muted-foreground py-3">prevEntryHash links the preceding ledger entry, not the parent receipt. Parent/child lineage is recorded separately through parentAttestationId.</p>
             <DetailRow label="Signature" value={receipt.signature} icon={Fingerprint} mono />
             <DetailRow label="Public Key" value={receipt.publicKey} icon={FileText} mono />
           </div>
@@ -417,25 +595,102 @@ export default function AttestationDetailPage() {
               <div className="py-3">
                 <div className="text-sm text-muted-foreground mb-2">Additional Metadata</div>
                 <pre className="text-xs font-mono bg-muted/50 p-3 rounded-md overflow-x-auto">
-                  {JSON.stringify(receipt.metadata as Record<string, unknown>, null, 2)}
+                  {JSON.stringify(redactMetadata(receipt.metadata), null, 2)}
                 </pre>
               </div>
-            ) : null}
+            ) : <p className="py-3 text-xs text-muted-foreground">{
+              receipt.evidenceVisibility?.metadata === "protected_unavailable" ? "Metadata is protected and unavailable to this viewer." :
+              receipt.evidenceVisibility?.metadata === "not_recorded" ? "Metadata was not recorded." :
+              "Metadata unavailable in this response; absence is not established."
+            }</p>}
           </div>
         </Card>
+
+        {lineageData && lineageData.lineage.length > 1 && (
+          <Card className="p-6" data-testid="card-model-lineage">
+            <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
+              <h3 className="font-semibold text-sm flex items-center gap-2">
+                <GitBranch className="w-4 h-4 text-primary" />
+                Declaration lineage
+              </h3>
+              <Badge variant="secondary" className="text-xs" data-testid="badge-distinct-models">
+                <Cpu className="w-3 h-3 mr-1" />
+                {lineageData.declaredModelCount ?? lineageData.distinctModels.length} distinct declared model labels
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground mb-4">
+               Recorded declarations for logical file <span className="font-mono">{lineageData.logicalFilePath ?? lineageData.filePath}</span>, oldest to newest, across original commit locators in the same repository. Source inventory labels are excluded from the declared model count. These are signed claims, not a count or independent proof of actual AI authors.
+            </p>
+            <div className="relative pl-5">
+              <div className="absolute left-[7px] top-2 bottom-2 w-px bg-border" aria-hidden="true" />
+              {lineageData.lineage.map((entry, i) => {
+                const prev = i > 0 ? lineageData.lineage[i - 1] : null;
+                 const presentation = receiptPresentation(entry);
+                 const modelChanged = prev !== null && presentation.kind === "model_declaration" && receiptPresentation(prev).kind === "model_declaration" && prev.modelName !== entry.modelName;
+                const isCurrent = entry.id === receipt.id;
+                return (
+                  <div key={entry.id} className="relative pb-4 last:pb-0" data-testid={`lineage-entry-${entry.id}`}>
+                    <div className={`absolute -left-5 top-1.5 w-[15px] h-[15px] rounded-full border-2 ${isCurrent ? "bg-primary border-primary" : "bg-background border-border"}`} aria-hidden="true" />
+                    <Link href={`/attestation/${entry.id}`}>
+                      <div className={`flex items-start gap-3 p-3 rounded-md border ${isCurrent ? "border-primary/40 bg-primary/5" : "border-border"} hover-elevate cursor-pointer`}>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {getTypeBadge(entry.attestationType)}
+                            <span className="text-sm font-medium">{entry.modelName}</span>
+                            <span className="text-xs text-muted-foreground">{entry.modelProvider}</span>
+                            {modelChanged && (
+                              <Badge variant="outline" className="text-xs text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-700" data-testid={`badge-model-changed-${entry.id}`}>
+                             Declared label changed
+                              </Badge>
+                            )}
+                            {isCurrent && (
+                              <Badge variant="secondary" className="text-xs" data-testid="badge-lineage-current">This receipt</Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap mt-1">
+                            <span className="text-xs text-muted-foreground">
+                              {entry.signedAt ? new Date(entry.signedAt).toLocaleString() : entry.createdAt ? new Date(entry.createdAt).toLocaleString() : ""}
+                            </span>
+                            {getVerdictDisplay(entry.auditVerdict)}
+                            {entry.parentAttestationId && (
+                              <span className="text-xs text-muted-foreground flex items-center gap-0.5">
+                                <Link2 className="w-3 h-3" />
+                                linked to #{entry.parentAttestationId}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <ArrowRight className="w-4 h-4 text-muted-foreground shrink-0 mt-1" />
+                      </div>
+                    </Link>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
 
         <Card className="p-6" data-testid="card-attestation-chain">
           <h3 className="font-semibold text-sm mb-4 flex items-center gap-2">
             <GitBranch className="w-4 h-4 text-primary" />
-            Attestation Chain
+            Parent/child attestation lineage
           </h3>
 
           {receipt.auditVerdict && (
             <div className="flex items-center gap-3 p-3 rounded-md bg-muted/50 mb-4" data-testid="section-audit-verdict">
-              <div className="text-xs text-muted-foreground">Audit Verdict:</div>
+              <div className="text-xs text-muted-foreground">Declared audit verdict:</div>
               {getVerdictDisplay(receipt.auditVerdict)}
             </div>
           )}
+          <div className="mb-4 text-xs space-y-2" data-testid="audit-details">
+            <h4 className="font-medium">Audit details</h4>
+            {receipt.auditDetails != null ? <pre className="bg-muted/50 p-3 rounded-md whitespace-pre-wrap break-words">{receipt.auditDetails}</pre> :
+              <p className="text-muted-foreground">{
+                receipt.evidenceVisibility?.auditDetails === "protected_unavailable" ? "Audit details are protected and unavailable to this viewer." :
+                receipt.evidenceVisibility?.auditDetails === "not_recorded" ? "Audit details were not recorded; no per-file security audit is established." :
+                "Audit details unavailable in this response; absence is not established."
+              }</p>}
+          </div>
 
           <div className="flex items-center gap-2 flex-wrap mb-4 p-3 rounded-md bg-muted/50 overflow-x-auto" data-testid="chain-diagram">
             <div className="flex items-center gap-1 px-3 py-1.5 rounded-md border border-border bg-background shrink-0" data-testid="chain-node-current">
@@ -494,7 +749,7 @@ export default function AttestationDetailPage() {
           )}
 
           {!receipt.parentAttestationId && (!receipt.childAttestations || receipt.childAttestations.length === 0) && (
-            <p className="text-sm text-muted-foreground" data-testid="text-no-chain">This is a standalone attestation with no linked chain.</p>
+            <p className="text-sm text-muted-foreground" data-testid="text-no-chain">This receipt has no linked parent or child attestations. Cryptographic SHA-256 ledger chaining is separate from parent/child attestation lineage.</p>
           )}
         </Card>
       </main>

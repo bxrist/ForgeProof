@@ -1,28 +1,23 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
-import { rm, readFile } from "fs/promises";
+import { rm, readFile, cp } from "fs/promises";
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
 const allowlist = [
   "@google/generative-ai",
   "axios",
-  "connect-pg-simple",
   "cors",
   "date-fns",
   "drizzle-orm",
   "drizzle-zod",
   "express",
   "express-rate-limit",
-  "express-session",
   "jsonwebtoken",
-  "memorystore",
   "multer",
   "nanoid",
   "nodemailer",
   "openai",
-  "passport",
-  "passport-local",
   "pg",
   "stripe",
   "uuid",
@@ -59,6 +54,8 @@ async function buildAll() {
     external: externals,
     logLevel: "info",
   });
+  // Protected source-hash inventory is not a public Vite asset.
+  await cp("server/evidence", "dist/evidence", { recursive: true });
 }
 
 buildAll().catch((err) => {

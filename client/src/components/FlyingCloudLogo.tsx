@@ -1,4 +1,4 @@
-import logoImage from "../assets/flyingcloud-logo.png";
+import logoImage from "@assets/ForgeProof_1793921023505.png";
 
 interface FlyingCloudLogoProps {
   className?: string;

@@ -1,5 +1,5 @@
 import { sql, relations } from "drizzle-orm";
-import { pgTable, text, varchar, serial, integer, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, serial, integer, timestamp, jsonb, boolean, foreignKey, check, uniqueIndex, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { users } from "./models/auth";
@@ -49,6 +49,47 @@ export const attestationReceipts = pgTable("attestation_receipts", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Transactional intent for the private Git ledger. Payloads contain only the
+// signed public receipt allowlist; tenant IDs, metadata, credentials, and
+// billing fields remain in the application database.
+export const receiptOutbox = pgTable("receipt_outbox", {
+  id: serial("id").primaryKey(),
+  receiptId: integer("receipt_id").notNull().unique()
+    .references(() => attestationReceipts.id, { onDelete: "restrict" }),
+  eventId: varchar("event_id", { length: 64 }).notNull().unique(),
+  payload: jsonb("payload").notNull(),
+  payloadHash: varchar("payload_hash", { length: 64 }).notNull(),
+  status: varchar("status").notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  nextAttemptAt: timestamp("next_attempt_at").notNull().defaultNow(),
+  leaseOwner: varchar("lease_owner"),
+  leaseExpiresAt: timestamp("lease_expires_at"),
+  lastErrorCode: varchar("last_error_code"),
+  gitCommitSha: varchar("git_commit_sha"),
+  ledgerSequence: integer("ledger_sequence"),
+  ledgerEventHash: varchar("ledger_event_hash", { length: 64 }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  deliveredAt: timestamp("delivered_at"),
+}, (t) => [
+  check("receipt_outbox_status", sql`${t.status} in ('pending', 'processing', 'delivered', 'blocked')`),
+  index("receipt_outbox_due").on(t.status, t.nextAttemptAt, t.id),
+]);
+
+// Local high-water mark is cross-checked against the signed Git checkpoint on
+// every delivery. A mismatch blocks writes; it never rewinds either ledger.
+export const receiptLedgerState = pgTable("receipt_ledger_state", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  baseReceiptId: integer("base_receipt_id").notNull(),
+  sequence: integer("sequence").notNull(),
+  eventHash: varchar("event_hash", { length: 64 }).notNull(),
+  receiptEntryHash: varchar("receipt_entry_hash", { length: 128 }).notNull(),
+  commitSha: varchar("commit_sha").notNull(),
+  signerKeyId: varchar("signer_key_id", { length: 64 }).notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  check("receipt_ledger_state_singleton", sql`${t.singleton} = true`),
+]);
+
 export const apiKeys = pgTable("api_keys", {
   id: serial("id").primaryKey(),
   userId: varchar("user_id").notNull(),
@@ -92,6 +133,18 @@ export const subscriptions = pgTable("subscriptions", {
   attestationLimit: integer("attestation_limit").notNull().default(100),
   attestationCount: integer("attestation_count").notNull().default(0),
   apiKeyLimit: integer("api_key_limit").notNull().default(1),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const pendingEmails = pgTable("pending_emails", {
+  id: serial("id").primaryKey(),
+  to: varchar("to").notNull(),
+  subject: varchar("subject").notNull(),
+  bodyHtml: text("body_html").notNull(),
+  bodyText: text("body_text").notNull(),
+  retryCount: integer("retry_count").notNull().default(0),
+  nextRetryAt: timestamp("next_retry_at").notNull().defaultNow(),
+  status: varchar("status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -185,6 +238,14 @@ export const insertSubscriptionSchema = createInsertSchema(subscriptions).omit({
   createdAt: true,
 });
 
+export const insertPendingEmailSchema = createInsertSchema(pendingEmails).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertPendingEmail = z.infer<typeof insertPendingEmailSchema>;
+export type PendingEmail = typeof pendingEmails.$inferSelect;
+
 export const PLAN_LIMITS = {
   free: { attestationLimit: 100, apiKeyLimit: 1, teamMembers: 1 },
   pro: { attestationLimit: 10000, apiKeyLimit: 10, teamMembers: 10 },
@@ -213,3 +274,45 @@ export type AuditLog = typeof auditLogs.$inferSelect;
 
 export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;
 export type Subscription = typeof subscriptions.$inferSelect;
+
+// Operator-verified ownership only; never populated from issuance metadata or API keys.
+// Permanent tenant pin survives revocation and organization deletion.
+export const serviceDashboardPrincipals = pgTable("service_dashboard_principals", {
+  issuerId: varchar("issuer_id").primaryKey().references(() => users.id),
+  tenantKey: text("tenant_key").notNull(),
+}, t => [uniqueIndex("service_dashboard_principal_target").on(t.issuerId, t.tenantKey)]);
+export const serviceDashboardBindings = pgTable("service_dashboard_bindings", {
+  id: serial("id").primaryKey(),
+  issuerId: varchar("issuer_id").notNull().references(() => users.id),
+  ownerId: varchar("owner_id").references(() => users.id),
+  orgId: integer("org_id").references(() => organizations.id, { onDelete: "cascade" }),
+  tenantKey: text("tenant_key").notNull(),
+  scope: text("scope").notNull().default("selected"),
+  scopeEvidence: text("scope_evidence"),
+  evidence: text("evidence").notNull(),
+  verifiedBy: varchar("verified_by").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  revokedAt: timestamp("revoked_at"),
+}, (t) => [
+  foreignKey({ columns: [t.issuerId, t.tenantKey], foreignColumns: [serviceDashboardPrincipals.issuerId, serviceDashboardPrincipals.tenantKey] }),
+  check("service_dashboard_binding_tenant_key", sql`${t.tenantKey} = case when ${t.ownerId} is not null then 'user:' || ${t.ownerId} else 'org:' || ${t.orgId}::text end`),
+  check("service_dashboard_binding_scope", sql`${t.scope} in ('selected', 'full-service')`),
+  check("service_dashboard_binding_scope_evidence", sql`(${t.scope} = 'selected' and ${t.scopeEvidence} is null) or (${t.scope} = 'full-service' and ${t.scopeEvidence} is not null and length(trim(${t.scopeEvidence})) > 0)`),
+  check("service_dashboard_binding_target", sql`(${t.ownerId} is null) <> (${t.orgId} is null)`),
+  check("service_dashboard_binding_service", sql`${t.issuerId} <> 'forgeproof-system'`),
+  check("service_dashboard_binding_separate_owner", sql`${t.ownerId} is distinct from ${t.issuerId}`),
+  check("service_dashboard_binding_evidence", sql`length(trim(${t.evidence})) > 0`),
+  check("service_dashboard_binding_verifier", sql`length(trim(${t.verifiedBy})) > 0`),
+  uniqueIndex("service_dashboard_binding_tenant").on(t.issuerId).where(sql`${t.revokedAt} is null`),
+]);
+export const serviceDashboardGrants = pgTable("service_dashboard_grants", {
+  id: serial("id").primaryKey(),
+  bindingId: integer("binding_id").notNull().references(() => serviceDashboardBindings.id, { onDelete: "cascade" }),
+  receiptId: integer("receipt_id").notNull().references(() => attestationReceipts.id, { onDelete: "cascade" }),
+  grantedBy: varchar("granted_by").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  revokedAt: timestamp("revoked_at"),
+}, (t) => [
+  uniqueIndex("service_dashboard_grant_active").on(t.bindingId, t.receiptId).where(sql`${t.revokedAt} is null`),
+  index("service_dashboard_grant_receipt").on(t.receiptId).where(sql`${t.revokedAt} is null`),
+]);

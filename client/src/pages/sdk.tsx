@@ -93,7 +93,7 @@ client = ForgeProofClient("fp_sk_your_key_here")
 receipt = client.attest(
     file_path="src/utils/auth.ts",
     file_content="export function authenticate() { ... }",
-    model_name="gpt-4-turbo",
+    model_name="gpt-5.6",
     model_provider="OpenAI"
 )
 print(receipt)`;
@@ -169,7 +169,7 @@ const client = new ForgeProofClient("fp_sk_your_key_here");
 const receipt = await client.attest(
   "src/utils/auth.ts",
   "sha256:a3f2e8c1...",
-  "gpt-4-turbo",
+  "gpt-5.6",
   "OpenAI"
 );
 console.log(receipt);`;
@@ -181,7 +181,7 @@ curl -X POST https://forgeproof.flyingcloudtech.com/api/v1/attest \\
   -d '{
     "file_path": "src/utils/auth.ts",
     "file_hash": "sha256:a3f2e8c1...",
-    "model_name": "gpt-4-turbo",
+    "model_name": "gpt-5.6",
     "model_provider": "OpenAI",
     "country_of_origin": "US"
   }'
@@ -199,15 +199,15 @@ const badgeMarkdown = `![ForgeProof](https://forgeproof.flyingcloudtech.com/api/
 
 const multiModelPythonCode = `import requests
 
-# Step 1: Create origin attestation (code was written by GPT-4)
+# Step 1: Create origin attestation (code was written by GPT-5)
 origin = requests.post(
-    "https://your-app.replit.app/api/v1/attest",
+    "https://forgeproof.flyingcloudtech.com/api/v1/attest",
     headers={"Authorization": "Bearer fp_your_api_key"},
     json={
         "file_hash": "sha256:a3f2e8d1...",
         "file_name": "auth.py",
         "file_path": "src/auth.py",
-        "model_name": "gpt-4-turbo",
+        "model_name": "gpt-5.6",
         "model_provider": "OpenAI",
         "country_of_origin": "US",
         "attestation_type": "origin"
@@ -217,13 +217,13 @@ origin_id = origin.json()["id"]
 
 # Step 2: Security audit by a DIFFERENT provider
 audit = requests.post(
-    "https://your-app.replit.app/api/v1/attest",
+    "https://forgeproof.flyingcloudtech.com/api/v1/attest",
     headers={"Authorization": "Bearer fp_your_api_key"},
     json={
         "file_hash": "sha256:a3f2e8d1...",
         "file_name": "auth.py",
         "file_path": "src/auth.py",
-        "model_name": "claude-3.5-sonnet",
+        "model_name": "claude-sonnet-5",
         "model_provider": "Anthropic",
         "country_of_origin": "US",
         "attestation_type": "security_audit",
@@ -244,7 +244,7 @@ const origin = await fetch("/api/v1/attest", {
     file_hash: "sha256:a3f2e8d1...",
     file_name: "auth.ts",
     file_path: "src/auth.ts",
-    model_name: "gpt-4-turbo",
+    model_name: "gpt-5.6",
     model_provider: "OpenAI",
     country_of_origin: "US",
     attestation_type: "origin"
@@ -263,7 +263,7 @@ const audit = await fetch("/api/v1/attest", {
     file_hash: "sha256:a3f2e8d1...",
     file_name: "auth.ts",
     file_path: "src/auth.ts",
-    model_name: "claude-3.5-sonnet",
+    model_name: "claude-sonnet-5",
     model_provider: "Anthropic",
     country_of_origin: "US",
     attestation_type: "security_audit",
@@ -274,14 +274,14 @@ const audit = await fetch("/api/v1/attest", {
 });`;
 
 const multiModelCurlCode = `# Create security audit attestation
-curl -X POST https://your-app.replit.app/api/v1/attest \\
+curl -X POST https://forgeproof.flyingcloudtech.com/api/v1/attest \\
   -H "Authorization: Bearer fp_your_api_key" \\
   -H "Content-Type: application/json" \\
   -d '{
     "file_hash": "sha256:a3f2e8d1...",
     "file_name": "auth.py",
     "file_path": "src/auth.py",
-    "model_name": "claude-3.5-sonnet",
+    "model_name": "claude-sonnet-5",
     "model_provider": "Anthropic",
     "country_of_origin": "US",
     "attestation_type": "security_audit",
@@ -290,14 +290,14 @@ curl -X POST https://your-app.replit.app/api/v1/attest \\
     "audit_details": "No vulnerabilities detected."
   }'`;
 
-const multiModelWorkflow = `Step 1: Origin Attestation (GPT-4 writes code)
+const multiModelWorkflow = `Step 1: Origin Attestation (GPT-5 writes code)
 Step 2: Security Audit (Claude reviews code, different provider)
 Step 3: Remediation (if issues found, Claude fixes and re-attests)`;
 
 const mcpAuditToolCode = `Tool: forgeproof_audit_attest
 Input: {
   "parentAttestationId": 42,
-  "modelName": "claude-3.5-sonnet",
+  "modelName": "claude-sonnet-5",
   "modelProvider": "Anthropic",
   "auditVerdict": "secure",
   "countryOfOrigin": "US",
@@ -328,7 +328,7 @@ def attest_file(file_path, file_content, model_name, model_provider,
 receipt = attest_file(
     file_path="src/utils/auth.ts",
     file_content=open("src/utils/auth.ts", "rb").read(),
-    model_name="claude-sonnet-4-5",
+    model_name="claude-sonnet-5",
     model_provider="Anthropic",
     api_key="fp_sk_your_key_here",
 )
@@ -358,7 +358,7 @@ async function attestFile(
 }
 
 const receipt = await attestFile(
-  "src/utils/auth.ts", "gpt-4o", "OpenAI", "fp_sk_your_key_here"
+  "src/utils/auth.ts", "gpt-5.6", "OpenAI", "fp_sk_your_key_here"
 );
 console.log(receipt.id, receipt.entry_hash);`;
 
@@ -367,7 +367,7 @@ const agentsMcpCode = `{
   "input": {
     "file_path": "src/utils/auth.ts",
     "file_hash": "sha256:a3f2e8c1...",
-    "model_name": "claude-sonnet-4-5",
+    "model_name": "claude-sonnet-5",
     "model_provider": "Anthropic",
     "country_of_origin": "US",
     "attestation_type": "origin"
@@ -380,7 +380,7 @@ const agentsCurlCode = `curl -X POST https://forgeproof.flyingcloudtech.com/api/
   -d '{
     "file_path": "src/utils/auth.ts",
     "file_hash": "sha256:a3f2e8c1...",
-    "model_name": "gpt-4o",
+    "model_name": "gpt-5.6",
     "model_provider": "OpenAI",
     "country_of_origin": "US",
     "attestation_type": "origin"
@@ -399,7 +399,7 @@ jobs:
       - name: Attest changed files
         env:
           FORGEPROOF_API_KEY: \${{ secrets.FORGEPROOF_API_KEY }}
-          MODEL_NAME: \${{ vars.AI_MODEL_NAME || 'gpt-4o' }}
+          MODEL_NAME: \${{ vars.AI_MODEL_NAME || 'gpt-5.6' }}
           MODEL_PROVIDER: \${{ vars.AI_MODEL_PROVIDER || 'OpenAI' }}
         run: |
           git diff --name-only HEAD~1 HEAD > changed_files.txt
@@ -415,7 +415,7 @@ jobs:
 const agentsPreCommitCode = `#!/bin/sh
 # .git/hooks/pre-commit  (chmod +x .git/hooks/pre-commit)
 API_KEY="\${FORGEPROOF_API_KEY}"
-MODEL_NAME="\${FORGEPROOF_MODEL_NAME:-gpt-4o}"
+MODEL_NAME="\${FORGEPROOF_MODEL_NAME:-gpt-5.6}"
 MODEL_PROVIDER="\${FORGEPROOF_MODEL_PROVIDER:-OpenAI}"
 
 git diff --cached --name-only --diff-filter=ACM | while IFS= read -r file; do
@@ -592,7 +592,7 @@ export default function SdkPage() {
   "id": 42,
   "file_path": "src/utils/auth.ts",
   "file_hash": "sha256:a3f2e8c1d9b4a7e6f5c3d2b1a0e9f8d7c6b5a4e3d2c1b0",
-  "model_name": "gpt-4-turbo",
+  "model_name": "gpt-5.6",
   "model_provider": "OpenAI",
   "country_of_origin": "US",
   "attestation_type": "origin",
@@ -625,8 +625,8 @@ export default function SdkPage() {
                       { field: "id", type: "integer", desc: "Auto-incrementing receipt identifier." },
                       { field: "file_path", type: "string", desc: "Repository-relative path to the attested file." },
                       { field: "file_hash", type: "string", desc: "SHA-256 hash of the file content, prefixed with \"sha256:\"." },
-                      { field: "model_name", type: "string", desc: "Specific AI model identifier (e.g., \"gpt-4-turbo\", \"claude-sonnet-4\")." },
-                      { field: "model_provider", type: "string", desc: "AI provider organization (e.g., \"OpenAI\", \"Anthropic\", \"Replit\")." },
+                      { field: "model_name", type: "string", desc: "Specific AI model identifier (e.g., \"gpt-5.6\", \"claude-sonnet-5\")." },
+                      { field: "model_provider", type: "string", desc: "AI provider organization (e.g., \"OpenAI\", \"Anthropic\")." },
                       { field: "country_of_origin", type: "string", desc: "ISO 3166-1 alpha-2 country code where the model operates." },
                       { field: "attestation_type", type: "string | null", desc: "Type of attestation: \"origin\", \"security_audit\", \"refactor\", or \"review\"." },
                       { field: "timestamp", type: "ISO 8601", desc: "UTC timestamp when the attestation was created." },
