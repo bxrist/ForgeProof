@@ -25,9 +25,17 @@ export async function initializeApplicationStorage(): Promise<void> {
   if (process.env.FORGEPROOF_GIT_GITHUB_REPOSITORY) {
     // Private GitHub repository through the authorized GitHub connection.
     const { createGitHubStore } = await import("./githubRuntime");
-    const { settings, service, custody, material } = createGitHubStore();
+    const resources = createGitHubStore();
+    const { settings, service, custody, material } = resources;
     const state = await service.replay();
     if (!state.records.users[settings.guardUserId]) throw new Error("Existing owner account is absent from the Git store");
+    if (process.env.LIFEOS_OWNER_APPROVAL_AUDIT_ID) {
+      const { loadLifeosGitBinding } = await import("../lifeosBinding");
+      if (!await loadLifeosGitBinding(resources, state, diagnostic =>
+        console.warn(`[lifeos] Binding load failed category=${diagnostic.category} exception=${diagnostic.exception}`)))
+        console.warn("[lifeos] Protected service binding unavailable; dedicated endpoint remains disabled");
+      else console.info("[lifeos] Protected service binding loaded and verified");
+    }
     const members = Object.keys(state.records.users);
     installApplicationStorage(subject => {
       if (subject && !members.includes(subject)) members.push(subject);

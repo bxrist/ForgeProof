@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
+import { projectIdSchema } from "./lifeosLifecycle";
 
 /** Trusted deployment configuration. Missing, malformed, or partial data disables LifeOS. */
 export interface LifeosApproval {
@@ -11,6 +12,7 @@ export interface LifeosApproval {
   approvedBySubject: string;
   approvedAt: string;
   approvalReference: string;
+  projects?: readonly string[];
 }
 
 export function validateLifeosApproval(value: unknown, now = Date.now()): Readonly<LifeosApproval> | null {
@@ -25,7 +27,10 @@ export function validateLifeosApproval(value: unknown, now = Date.now()): Readon
         !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(approval.approvedAt) ||
         !Number.isFinite(Date.parse(approval.approvedAt)) || Date.parse(approval.approvedAt) > now ||
         typeof approval.approvalReference !== "string" || !approval.approvalReference.trim()) return null;
-    return Object.freeze(approval as LifeosApproval);
+    if (approval.projects !== undefined && (!Array.isArray(approval.projects) ||
+        !approval.projects.length || approval.projects.some(p => !projectIdSchema.safeParse(p).success) ||
+        new Set(approval.projects).size !== approval.projects.length)) return null;
+    return Object.freeze({ ...approval, ...(approval.projects ? { projects: Object.freeze([...approval.projects]) } : {}) } as LifeosApproval);
   } catch {
     return null;
   }
@@ -34,6 +39,9 @@ export function validateLifeosApproval(value: unknown, now = Date.now()): Readon
 function loadApproval(): Readonly<LifeosApproval> | null {
   if (process.env.NODE_ENV !== "production") return null;
   try {
+    // A selected Git approval is installed only after signed bootstrap verification.
+    // Never load or fall back to legacy material when that selector is supplied.
+    if (process.env.LIFEOS_OWNER_APPROVAL_AUDIT_ID) return null;
     if (process.env.LIFEOS_OWNER_APPROVAL_JSON && process.env.LIFEOS_OWNER_APPROVAL_FILE) return null;
     const raw = process.env.LIFEOS_OWNER_APPROVAL_JSON ?? (process.env.LIFEOS_OWNER_APPROVAL_FILE
       ? (isAbsolute(process.env.LIFEOS_OWNER_APPROVAL_FILE)
@@ -47,4 +55,9 @@ function loadApproval(): Readonly<LifeosApproval> | null {
   }
 }
 
-export const lifeosApproval: Readonly<LifeosApproval> | null = loadApproval();
+export let lifeosApproval: Readonly<LifeosApproval> | null = loadApproval();
+
+/** Called only by verified Git bootstrap, never with request-body data. */
+export function installProtectedLifeosApproval(value: unknown): void {
+  lifeosApproval = process.env.NODE_ENV === "production" ? validateLifeosApproval(value) : null;
+}

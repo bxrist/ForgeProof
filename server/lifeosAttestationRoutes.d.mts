@@ -2,6 +2,7 @@ import type { Express, Request, RequestHandler } from 'express';
 import type { GitStorage } from './git-store/storage';
 import type { LifeosProof } from './lifeosEntitlement';
 import type { Replay } from './git-store/store.mjs';
+import type { LifecycleInput } from './lifeosLifecycle';
 interface LifeosAttestationBody {
   file_path: string;
   file_hash: string;
@@ -15,6 +16,7 @@ interface LifeosAttestationBody {
   repository?: string;
   audit_verdict?: string;
   audit_details?: string;
+  lifecycle?: LifecycleInput;
 }
 export function registerLifeosAttestationRoutes(app: Express, deps: {
   limiter: RequestHandler;
@@ -25,4 +27,6 @@ export function registerLifeosAttestationRoutes(app: Express, deps: {
     proof: LifeosProof, identity: {requestId: string; signedAt: string} | undefined): Promise<object>;
   detectCountry(req: Request): string | null;
   verifyState(proof: LifeosProof, userId: string, state: Replay, matches: boolean): void;
+  validateLifecycle?(proof: LifeosProof, data: LifeosAttestationBody): void | Promise<void>;
+  validateRecovered?(proof: LifeosProof, project: string): void | Promise<void>;
 }): void;

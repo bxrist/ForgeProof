@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import express from "express";
 import supertest from "supertest";
 import { createServer } from "node:http";
+import * as backend from "../server/storageBackend";
 
 const state = vi.hoisted(() => ({
   approval: null as any,
@@ -49,7 +50,7 @@ vi.mock("../server/stripeClient", () => ({
 }));
 
 import { registerRoutes } from "../server/routes";
-import { proveLifeosControl, verifyLifeosInTransaction } from "../server/lifeosEntitlement";
+import { proveLifeosControl, verifyLifeosInTransaction, requireLifeosProject } from "../server/lifeosEntitlement";
 import { createCheckoutSession, createPortalSession, ensureStripeCustomer } from "../server/stripe";
 
 const secret = "synthetic-test-key-not-a-real-credential";
@@ -148,6 +149,96 @@ describe("LifeOS request-scoped owner-approved proof", () => {
 });
 
 describe("LifeOS isolation from commercial billing", () => {
+  it("checks project authorization using the existing binding and authentic proof", async () => {
+    state.approval.projects = ["fixture/lifeos"];
+    const proof = await proveLifeosControl(`Bearer ${secret}`);
+    expect(() => requireLifeosProject(proof, "fixture/lifeos")).not.toThrow();
+    expect(() => requireLifeosProject(proof, "another/project")).toThrow();
+    expect(() => requireLifeosProject({ ...proof }, "fixture/lifeos")).toThrow();
+    state.approval.projects = undefined;
+    expect(() => requireLifeosProject(proof, "fixture/lifeos")).toThrow();
+  });
+  it("offers read-only scope verification without leaking the key or approval hash", async () => {
+    state.approval.projects = ["fixture/lifeos"];
+    const result = await supertest(app).get("/api/lifeos/authorization").set("Authorization", `Bearer ${secret}`);
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ authorized: true, projects: ["fixture/lifeos"], lifecycleEnabled: false });
+    expect(JSON.stringify(result.body)).not.toContain(hash);
+    expect(state.query).not.toHaveBeenCalled();
+    expect((await supertest(app).get("/api/lifeos/authorization")).status).toBe(403);
+  });
+  it("does not silently ignore lifecycle evidence on an unconfigured project or SQL runtime", async () => {
+    const lifecycle = { project: "fixture/lifeos", stage: "source-write", parents: [], observedAt: "2026-11-10T00:00:00Z" };
+    expect((await supertest(app).post("/api/lifeos/attest").set("Authorization", `Bearer ${secret}`)
+      .send({ ...payload, lifecycle })).status).toBe(403);
+    state.approval.projects = ["fixture/lifeos"];
+    expect((await supertest(app).post("/api/lifeos/attest").set("Authorization", `Bearer ${secret}`)
+      .send({ ...payload, lifecycle })).status).toBe(503);
+    expect(state.query).not.toHaveBeenCalled();
+    expect(state.getOrCreateFreeSubscription).not.toHaveBeenCalled();
+  });
+  it("routes scoped lifecycle issuance through Git with transactional key and project revalidation", async () => {
+    state.approval.projects = ["fixture/lifeos"];
+    const lifecycle = { project: "fixture/lifeos", stage: "source-write", parents: [], observedAt: "2026-11-10T00:00:00Z" };
+    const issue = vi.fn(async (_src, _signer, _id, validate, input) => {
+      await validate({ records: { users: { owner: { id: "owner" }, "lifeos-service-0a": state.user },
+        apiKeys: { [state.key.id]: state.key }, subscriptions: {} } });
+      return { id: 123, lifecycleEvidence: { payload: input } };
+    });
+    const fakeGit = { issueAttestationWithSigner: issue, custody: { matches: vi.fn(async () => true) } };
+    const spy = vi.spyOn(backend, "currentApplicationStorage").mockReturnValue(fakeGit as any);
+    try {
+      const response = await supertest(app).post("/api/lifeos/attest").set("Authorization", `Bearer ${secret}`)
+        .send({ ...payload, lifecycle });
+      expect(response.status).toBe(201);
+      expect(response.body.lifecycleEvidence.payload).toEqual(lifecycle);
+      expect(response.body.metering).toBe("internal");
+      expect(state.query).not.toHaveBeenCalled();
+      expect(state.getOrCreateFreeSubscription).not.toHaveBeenCalled();
+      const mismatch = await supertest(app).post("/api/lifeos/attest").set("Authorization", `Bearer ${secret}`)
+        .send({ ...payload, lifecycle: { ...lifecycle, model: { name: "different", provider: "fixture" } } });
+      expect(mismatch.status).toBe(400);
+      expect(issue).toHaveBeenCalledTimes(1);
+    } finally { spy.mockRestore(); }
+  });
+  it("logs only safe stage timings for failed issuance", async () => {
+    const issue = vi.fn(async () => { throw new Error(`private-provider-detail:${secret}:${hash}`); });
+    const spy = vi.spyOn(backend, "currentApplicationStorage").mockReturnValue({
+      issueAttestationWithSigner: issue, custody: { matches: vi.fn(async () => true) },
+    } as any);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const response = await supertest(app).post("/api/lifeos/attest")
+        .set("Authorization", `Bearer ${secret}`).send(payload);
+      expect(response.status).toBe(500);
+      expect(issue).toHaveBeenCalledOnce();
+      const call = warning.mock.calls.find(args => args[0] === "[lifeos] Request timing");
+      expect(call).toBeDefined();
+      const timing = JSON.parse(String(call![1]));
+      expect(timing).toEqual({
+        stage: "issuance", status: 500, category: "internal_failure",
+        totalMs: expect.any(Number), proofMs: expect.any(Number), issuanceMs: expect.any(Number),
+      });
+      expect(JSON.stringify(call)).not.toContain(secret);
+      expect(JSON.stringify(call)).not.toContain(hash);
+      expect(JSON.stringify(call)).not.toContain("private-provider-detail");
+    } finally { spy.mockRestore(); warning.mockRestore(); }
+  });
+  it("exposes verified lifecycle evidence separately and fails closed on missing or invalid evidence", async () => {
+    const read = vi.fn(async () => ({ verified: true, parentsVerified: true }));
+    const spy = vi.spyOn(backend, "currentApplicationStorage").mockReturnValue({ getPublicLifecycleEvidence: read } as any);
+    try {
+      expect((await supertest(app).get("/api/verify/entry/123/lifecycle")).body).toEqual({ verified: true, parentsVerified: true });
+      read.mockResolvedValueOnce(undefined as any);
+      expect((await supertest(app).get("/api/verify/entry/123/lifecycle")).status).toBe(404);
+      read.mockRejectedValueOnce(new Error("PRIVATE INTERNAL DETAIL"));
+      const invalid = await supertest(app).get("/api/verify/entry/123/lifecycle");
+      expect(invalid.status).toBe(422);
+      expect(invalid.body.verified).toBe(false);
+      expect(invalid.text).not.toContain("PRIVATE INTERNAL DETAIL");
+      expect((await supertest(app).get("/api/verify/entry/123bad/lifecycle")).status).toBe(400);
+    } finally { spy.mockRestore(); }
+  });
   it("creates an internal receipt without touching subscriptions or Stripe", async () => {
     const response = await supertest(app).post("/api/lifeos/attest")
       .set("Authorization", `Bearer ${secret}`).send(payload);

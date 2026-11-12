@@ -5,13 +5,14 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import rateLimit from "express-rate-limit";
 import { storage } from "./storage";
 import { currentApplicationStorage, setVerifiedStoragePrincipal } from "./storageBackend";
-import { registerLifeosAttestationRoutes } from "./lifeosAttestationRoutes.mjs";
 import type { GitStorage } from "./git-store/storage";
 import { randomUUID } from "node:crypto";
+import { registerLifeosAttestationRoutes } from "./lifeosAttestationRoutes.mjs";
 import { registerDashboardAccessRoutes } from "./dashboardAccess";
 import { registerGitHubAppRoutes } from "./githubApp/routes";
 import { pool } from "./legacySqlPool";
-import { proveLifeosControl, restrictLifeosServiceWrites, verifyLifeosInTransaction, verifyLifeosGitState, type LifeosProof } from "./lifeosEntitlement";
+import { proveLifeosControl, restrictLifeosServiceWrites, verifyLifeosInTransaction, verifyLifeosGitState, requireLifeosProject, getLifeosProjects, type LifeosProof } from "./lifeosEntitlement";
+import { lifecycleSchema, type LifecycleInput } from "./lifeosLifecycle";
 import { requireAuth as isAuthenticated, optionalAuth, sessionUserId } from "./middlewares/requireAuth";
 import { getAuth } from "@clerk/express";
 import { sha256, signData, getKeyPair, computeEntryHash, generateApiKey, verifySignature } from "./crypto";
@@ -85,6 +86,7 @@ const attestRequestSchema = z.object({
   audit_verdict: z.enum(["secure", "flagged", "remediated", "needs_review"]).optional(),
   audit_details: z.string().optional(),
 });
+const lifeosRequestSchema = attestRequestSchema.extend({ lifecycle: lifecycleSchema.optional() });
 
 const agentAttestSchema = z.object({
   files: z.array(z.object({
@@ -191,6 +193,7 @@ async function createAttestationReceipt(
   detectedCountry: string | null,
   repositoryId?: number,
   lifeosProof?: LifeosProof,
+  lifecycle?: LifecycleInput,
   identity?: { requestId: string; signedAt: string }
 ) {
   const subscription = lifeosProof ? null : await storage.getOrCreateFreeSubscription(userId);
@@ -212,7 +215,8 @@ async function createAttestationReceipt(
       const row=state.records.apiKeys[lifeosProof.apiKeyId];
       const matches=!!row && await gitStorage.custody.matches(gitStorage.custodyScope,String(row.credentialRef),lifeosProof.keyHash);
       verifyLifeosGitState(lifeosProof,userId,state,matches);
-    } : undefined);
+      if (lifecycle) requireLifeosProject(lifeosProof, lifecycle.project);
+    } : undefined, lifecycle);
   }
 
   if (identity) throw Object.assign(new Error("Durable Git storage required"), {status:503});
@@ -348,14 +352,38 @@ export async function registerRoutes(
 ): Promise<Server> {
   app.use("/api", restrictLifeosServiceWrites);
 
+  app.get("/api/lifeos/authorization", publicApiLimiter, async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    try {
+      const proof = await proveLifeosControl(req.headers.authorization);
+      const projects = getLifeosProjects(proof);
+      res.json({ authorized: true, projects, lifecycleEnabled: !!currentApplicationStorage() && projects.length > 0 });
+    } catch {
+      res.status(403).json({ authorized: false, message: "Verified LifeOS service binding required" });
+    }
+  });
+
   registerLifeosAttestationRoutes(app, {
     limiter: publicApiLimiter,
     proveControl: proveLifeosControl,
     getStorage: () => currentApplicationStorage() as GitStorage | undefined,
-    parseBody: (body: unknown) => attestRequestSchema.safeParse(body),
-    createReceipt: createAttestationReceipt,
+    parseBody: body => lifeosRequestSchema.safeParse(body),
     detectCountry: detectCountryFromRequest,
     verifyState: verifyLifeosGitState,
+    validateLifecycle(proof, data) {
+      if (data.lifecycle) {
+        requireLifeosProject(proof, data.lifecycle.project);
+        if (!currentApplicationStorage()) throw Object.assign(new Error("Lifecycle evidence requires the existing Git runtime"), {status:503});
+        if (!/^[a-f0-9]{64}$/.test(data.file_hash))
+          throw Object.assign(new Error("Lifecycle file_hash must be a bare lowercase SHA-256 digest"), {status:400});
+        const observed = data.lifecycle.model;
+        if (observed && (observed.name !== data.model_name || observed.provider !== data.model_provider))
+          throw Object.assign(new Error("Observed model must match receipt model declarations"), {status:400});
+      }
+    },
+    validateRecovered: (proof, project) => requireLifeosProject(proof, project),
+    createReceipt: (userId, data, country, repositoryId, proof, identity) =>
+      createAttestationReceipt(userId, data, country, repositoryId, proof, data.lifecycle, identity),
   });
 
   // ─── Auth ─────────────────────────────────────────
@@ -1638,6 +1666,20 @@ export async function registerRoutes(
       ...(ledgerStatuses.has(entry.id) ? { gitLedgerStatus: ledgerStatuses.get(entry.id) } : {}),
       createdAt: entry.createdAt,
     });
+  });
+
+  app.get("/api/verify/entry/:id/lifecycle", verifyLimiter, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ message: "Invalid ID" });
+    const git = currentApplicationStorage() as GitStorage | undefined;
+    if (!git) return res.status(404).json({ message: "No signed lifecycle evidence" });
+    try {
+      const evidence = await git.getPublicLifecycleEvidence(id);
+      if (!evidence) return res.status(404).json({ message: "No signed lifecycle evidence" });
+      return res.json(evidence);
+    } catch {
+      return res.status(422).json({ verified: false, message: "Lifecycle evidence could not be verified" });
+    }
   });
 
   // ─── Public Receipt Lookup ──────────────────────────

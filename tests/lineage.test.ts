@@ -259,21 +259,17 @@ describe("GET /api/attestations/:id/lineage — access control", () => {
     ];
 
     mockStorage.getAttestation.mockResolvedValue(attestation);
-    mockStorage.getAttestationsByFilePath.mockResolvedValue(lineageItems);
+    mockStorage.getAttestations.mockResolvedValue(lineageItems);
 
     const res = await supertest(app).get("/api/attestations/10/lineage");
 
     expect(res.status).toBe(200);
     expect(res.body.filePath).toBe("src/model.py");
     expect(res.body.lineage).toHaveLength(2);
-    expect(mockStorage.getAttestationsByFilePath).toHaveBeenCalledWith(
-      "src/model.py",
-      "user-alice",
-      null,
-    );
+    expect(mockStorage.getAttestations).toHaveBeenCalledWith("user-alice");
   });
 
-  it("2. System/demo receipts appear in lineage results", async () => {
+  it("2. Accessible demo receipts do not become another issuer's logical history", async () => {
     authCtx.userId = "user-alice";
 
     const attestation = makeAttestation({ id: 20, userId: "user-alice", filePath: "src/demo.py" });
@@ -283,13 +279,13 @@ describe("GET /api/attestations/:id/lineage — access control", () => {
     ];
 
     mockStorage.getAttestation.mockResolvedValue(attestation);
-    mockStorage.getAttestationsByFilePath.mockResolvedValue(lineageItems);
+    mockStorage.getAttestations.mockResolvedValue(lineageItems);
 
     const res = await supertest(app).get("/api/attestations/20/lineage");
 
     expect(res.status).toBe(200);
     const userIds = res.body.lineage.map((r: any) => r.userId);
-    expect(userIds).toContain("forgeproof-system");
+    expect(userIds).not.toContain("forgeproof-system");
     expect(userIds).toContain("user-alice");
   });
 
@@ -321,20 +317,16 @@ describe("GET /api/attestations/:id/lineage — access control", () => {
     // bob's receipt (id: 99) is NOT in the returned slice — it was excluded by DB query.
 
     mockStorage.getAttestation.mockResolvedValue(attestation);
-    mockStorage.getAttestationsByFilePath.mockResolvedValue(filteredLineage);
+    mockStorage.getAttestations.mockResolvedValue(filteredLineage);
 
     const res = await supertest(app).get("/api/attestations/40/lineage");
 
     expect(res.status).toBe(200);
     // Verify the route passed alice's userId to the storage filter
-    expect(mockStorage.getAttestationsByFilePath).toHaveBeenCalledWith(
-      "shared/lib.py",
-      "user-alice",
-      null,
-    );
-    // Verify the response contains only alice's and system receipts
+    expect(mockStorage.getAttestations).toHaveBeenCalledWith("user-alice");
+    // Accessible system receipts still belong to a distinct issuer's history.
     const returnedUserIds: string[] = res.body.lineage.map((r: any) => r.userId);
-    expect(returnedUserIds.every((uid) => uid === "user-alice" || uid === "forgeproof-system")).toBe(true);
+    expect(returnedUserIds).toEqual(["user-alice"]);
     // bob's receipt must not appear
     const ids: number[] = res.body.lineage.map((r: any) => r.id);
     expect(ids).not.toContain(99);
@@ -352,7 +344,7 @@ describe("GET /api/attestations/:id/lineage — access control", () => {
     ];
 
     mockStorage.getAttestation.mockResolvedValue(attestation);
-    mockStorage.getAttestationsByFilePath.mockResolvedValue(orderedLineage);
+    mockStorage.getAttestations.mockResolvedValue([...orderedLineage].reverse());
 
     const res = await supertest(app).get("/api/attestations/50/lineage");
 
@@ -433,7 +425,8 @@ describe("service dashboard route boundaries without network", () => {
     mockStorage.getAttestations.mockResolvedValue([parent]);
     mockStorage.getAttestationsByFilePath.mockResolvedValue([parent]);
     const res = await directDashboard("/api/attestations/:id/lineage", 41);
-    expect(mockStorage.getAttestationsByFilePath).toHaveBeenCalledWith("src/model.py", "user-alice", null, "service-a");
+    expect(mockStorage.getAttestations).toHaveBeenCalledWith("user-alice");
+    expect(mockStorage.getAttestationsByFilePath).not.toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ lineage: [parent] }));
   });
   it("exports authorized service receipts and denies the same receipt after revocation", async () => {

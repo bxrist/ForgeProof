@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { lifeosApproval, type LifeosApproval } from "./lifeosApproval";
 import { sessionUserId } from "./middlewares/requireAuth";
 import { hasPinnedDurableSigner } from "./crypto";
-import { hasApplicationStorage, setVerifiedStoragePrincipal } from "./storageBackend";
+import { hasApplicationStorage, setVerifiedStoragePrincipal, withStoragePrincipal } from "./storageBackend";
 import type { Replay } from "./git-store/store.mjs";
 
 const proofs = new WeakSet<object>();
@@ -65,20 +65,21 @@ export async function proveLifeosControl(header: string | undefined): Promise<Li
   if (!hasPinnedDurableSigner()) deny("LifeOS requires the verified durable ForgeProof signer");
   const hash = tokenHash(header);
   if (!a || hash !== a.apiKeyHash) deny();
-  const key = await storage.getApiKeyByHash(hash);
-  if (!validKey(hasApplicationStorage() && key ? {...key,keyHash:hash} : key, a)) deny();
-  setVerifiedStoragePrincipal(a.userId);
-  const [user, owner, sub, keys] = await Promise.all([
-    storage.getUser(a.userId),
-    storage.getUser(a.approvedBySubject),
-    storage.getSubscription(a.userId),
-    storage.getApiKeys(a.userId),
-  ]);
-  if (!owner || !noCommercialAssociation(user, sub) ||
-      keys.some(k => k.id !== a.apiKeyId && k.isActive &&
-        (!k.expiresAt || new Date(k.expiresAt).getTime() > Date.now()))) {
-    deny("LifeOS binding is not an isolated non-commercial service identity");
-  }
+  // The candidate subject comes from protected owner configuration, and only
+  // after bearer possession matches that binding. Do not widen Git key lookup.
+  await withStoragePrincipal(a.userId, async () => {
+    const key = await storage.getApiKeyByHash(hash);
+    if (!validKey(hasApplicationStorage() && key ? {...key,keyHash:hash} : key, a)) deny();
+    const [user, owner, sub, keys] = await Promise.all([
+      storage.getUser(a.userId), storage.getUser(a.approvedBySubject),
+      storage.getSubscription(a.userId), storage.getApiKeys(a.userId),
+    ]);
+    if (!owner || !noCommercialAssociation(user, sub) ||
+        keys.some(k => k.id !== a.apiKeyId && k.isActive &&
+          (!k.expiresAt || new Date(k.expiresAt).getTime() > Date.now())))
+      deny("LifeOS binding is not an isolated non-commercial service identity");
+  });
+  try { setVerifiedStoragePrincipal(a.userId); } catch { deny("Conflicting authenticated subject"); }
   const proof = Object.freeze({ userId: a.userId, apiKeyId: a.apiKeyId, keyHash: hash });
   proofs.add(proof);
   return proof;
@@ -94,6 +95,18 @@ export function verifyLifeosGitState(proof: LifeosProof, userId: string, state: 
       !noCommercialAssociation(user && {...user,githubToken:user.githubTokenRef},sub) ||
       Object.values(state.records.apiKeys).some(k=>k.userId===userId && k.id!==a.apiKeyId && k.isActive &&
         (!k.expiresAt || Date.parse(String(k.expiresAt))>Date.now()))) deny();
+}
+
+/** Existing owner approval scopes lifecycle issuance; legacy origin remains compatible. */
+export function requireLifeosProject(proof: LifeosProof, project: string): void {
+  if (!getLifeosProjects(proof).includes(project))
+    deny("LifeOS project is not included in the existing owner approval binding");
+}
+
+export function getLifeosProjects(proof: LifeosProof): readonly string[] {
+  const a = approval();
+  if (!proofs.has(proof) || !a || proof.userId !== a.userId) deny();
+  return a.projects ?? [];
 }
 
 // Recheck under the SAME transaction as the receipt insert, locking the key and
@@ -131,7 +144,11 @@ export const restrictLifeosServiceWrites: RequestHandler = async (req, res, next
     let isService = sessionUserId(req) === subject;
     const hash = tokenHash(req.headers.authorization);
     if (hash) {
-      const key = await storage.getApiKeyByHash(hash);
+      // Resolve the approved candidate in its own scope without changing the
+      // request principal. A stale binding must not block another customer's key.
+      const key = hash === lifeosApproval?.apiKeyHash
+        ? await withStoragePrincipal(subject, () => storage.getApiKeyByHash(hash))
+        : await storage.getApiKeyByHash(hash);
       isService ||= key?.userId === subject;
     }
     if (isService && req.path !== "/lifeos/attest") {
