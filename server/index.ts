@@ -11,7 +11,11 @@ import { hasApplicationStorage, requestStorageScope } from "./storageBackend";
 import { initializeApplicationStorage } from "./git-store/applicationRuntime";
 import { withStripeRequestClient } from "./stripeClient";
 
+import { createStartupBarrier } from "./startupBarrier";
+
 const app = express();
+const startupBarrier = createStartupBarrier();
+app.use(startupBarrier.middleware);
 app.set("trust proxy", 1);
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 const httpServer = createServer(app);
@@ -119,7 +123,26 @@ app.use((req, res, next) => {
   next();
 });
 
+// Open the configured provider port before slow signed Git replay. The barrier
+// exposes only root liveness until storage and every route are initialized.
+const port = parseInt(process.env.PORT || "5000", 10);
+function failStartup() {
+  startupBarrier.fail();
+  // Provider/custody errors may contain credentials or customer data.
+  console.error("Application startup failed; application unavailable");
+  process.exit(1);
+}
+httpServer.on("error", failStartup);
+
 (async () => {
+  await new Promise<void>((resolve) => {
+    httpServer.listen({
+      port,
+      host: process.env.FORGEPROOF_ISOLATED_STAGING === "true" ? "127.0.0.1" : "0.0.0.0",
+      reusePort: true,
+    }, resolve);
+  });
+  log(`listening on port ${port}; application initializing`);
   await initializeApplicationStorage();
   app.use((_req, _res, next) => requestStorageScope(next));
   await registerRoutes(httpServer, app);
@@ -130,6 +153,33 @@ app.use((req, res, next) => {
   } catch (e) {
     console.error("Seed error:", e);
   }
+
+  app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
+    const status = err.status || err.statusCode || 500;
+    const message = err.message || "Internal Server Error";
+
+    console.error("Internal Server Error:", err);
+
+    if (res.headersSent) {
+      return next(err);
+    }
+
+    return res.status(status).json({ message });
+  });
+
+  // importantly only setup vite in development and after
+  // setting up all the other routes so the catch-all route
+  // doesn't interfere with the other routes
+  if (process.env.NODE_ENV === "production") {
+    serveStatic(app);
+  } else {
+    const { setupVite } = await import("./vite");
+    await setupVite(httpServer, app);
+  }
+
+  startupBarrier.ready();
+  log(`application ready on port ${port}`);
+  if (!hasApplicationStorage()) startReceiptOutboxWorker();
 
   (async () => {
     if (hasApplicationStorage()) return;
@@ -187,43 +237,4 @@ app.use((req, res, next) => {
     }
   })();
 
-  app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
-    console.error("Internal Server Error:", err);
-
-    if (res.headersSent) {
-      return next(err);
-    }
-
-    return res.status(status).json({ message });
-  });
-
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (process.env.NODE_ENV === "production") {
-    serveStatic(app);
-  } else {
-    const { setupVite } = await import("./vite");
-    await setupVite(httpServer, app);
-  }
-
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(
-    {
-      port,
-      host: process.env.FORGEPROOF_ISOLATED_STAGING === "true" ? "127.0.0.1" : "0.0.0.0",
-      reusePort: true,
-    },
-    () => {
-      log(`serving on port ${port}`);
-      if (!hasApplicationStorage()) startReceiptOutboxWorker();
-    },
-  );
-})();
+})().catch(failStartup);
