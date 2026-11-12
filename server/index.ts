@@ -12,6 +12,7 @@ import { initializeApplicationStorage } from "./git-store/applicationRuntime";
 import { withStripeRequestClient } from "./stripeClient";
 
 import { createStartupBarrier } from "./startupBarrier";
+import { reportStartupDiagnostic } from "./startupDiagnostics";
 
 const app = express();
 const startupBarrier = createStartupBarrier();
@@ -126,15 +127,12 @@ app.use((req, res, next) => {
 // Open the configured provider port before slow signed Git replay. The barrier
 // exposes only root liveness until storage and every route are initialized.
 const port = parseInt(process.env.PORT || "5000", 10);
+let startupPhase: "listen" | "storage" | "routes" | "assets" | "ready" = "listen";
 function failStartup(error?: unknown) {
   startupBarrier.fail();
   // Provider/custody errors may contain credentials or customer data.
   console.error("Application startup failed; application unavailable");
-  const code = (error as {code?: unknown} | undefined)?.code;
-  const category = code === "GIT_RATE_LIMITED" ? "git_rate_limited"
-    : error instanceof Error && error.name === "IntegrityError" ? "git_integrity"
-    : "initialization_error";
-  console.error(`[startup] category=${category}`);
+  reportStartupDiagnostic(startupPhase, error);
   process.exit(1);
 }
 httpServer.on("error", failStartup);
@@ -148,7 +146,11 @@ httpServer.on("error", failStartup);
     }, resolve);
   });
   log(`listening on port ${port}; application initializing`);
+  startupPhase = "storage";
+  reportStartupDiagnostic(startupPhase);
   await initializeApplicationStorage();
+  startupPhase = "routes";
+  reportStartupDiagnostic(startupPhase);
   app.use((_req, _res, next) => requestStorageScope(next));
   await registerRoutes(httpServer, app);
 
@@ -175,6 +177,8 @@ httpServer.on("error", failStartup);
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
+  startupPhase = "assets";
+  reportStartupDiagnostic(startupPhase);
   if (process.env.NODE_ENV === "production") {
     serveStatic(app);
   } else {
@@ -183,6 +187,8 @@ httpServer.on("error", failStartup);
   }
 
   startupBarrier.ready();
+  startupPhase = "ready";
+  reportStartupDiagnostic(startupPhase);
   log(`application ready on port ${port}`);
   if (!hasApplicationStorage()) startReceiptOutboxWorker();
 
