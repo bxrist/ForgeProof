@@ -30,6 +30,9 @@ vi.mock("../server/email", () => ({}));
 vi.mock("../server/stripeAdmin", () => ({}));
 vi.mock("../server/lifeosEntitlement", () => ({
   restrictLifeosServiceWrites: (_req: any, _res: any, next: any) => next(),
+  proveLifeosControl: vi.fn().mockResolvedValue({ ok: false, reason: "test_without_lifeos_control" }),
+  verifyLifeosGitState: vi.fn(),
+  verifyLifeosInTransaction: vi.fn(),
 }));
 
 import { registerRoutes } from "../server/routes";
