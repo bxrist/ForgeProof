@@ -126,10 +126,15 @@ app.use((req, res, next) => {
 // Open the configured provider port before slow signed Git replay. The barrier
 // exposes only root liveness until storage and every route are initialized.
 const port = parseInt(process.env.PORT || "5000", 10);
-function failStartup() {
+function failStartup(error?: unknown) {
   startupBarrier.fail();
   // Provider/custody errors may contain credentials or customer data.
   console.error("Application startup failed; application unavailable");
+  const code = (error as {code?: unknown} | undefined)?.code;
+  const category = code === "GIT_RATE_LIMITED" ? "git_rate_limited"
+    : error instanceof Error && error.name === "IntegrityError" ? "git_integrity"
+    : "initialization_error";
+  console.error(`[startup] category=${category}`);
   process.exit(1);
 }
 httpServer.on("error", failStartup);

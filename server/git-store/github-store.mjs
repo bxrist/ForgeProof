@@ -34,13 +34,28 @@ export class GitHubTransport {
     // Only immutable reads: never replay a write or retry an integrity failure.
     for (let attempt = 0; attempt < 2 && method === 'GET' &&
         /^\/git\/(commits|trees|blobs)\//.test(path) &&
-        [502, 503, 504].includes(response.status); attempt++) {
+        [429, 502, 503, 504].includes(response.status); attempt++) {
+      status = response.status;
+      let delay = 250 * (attempt + 1);
+      if (status === 429) {
+        const header = response.headers?.get?.('retry-after');
+        const seconds = header && /^\d+$/.test(header) ? Number(header) : null;
+        const date = header && seconds === null ? Date.parse(header) : NaN;
+        delay = seconds !== null ? seconds * 1000 : Number.isFinite(date)
+          ? Math.max(0, date - Date.now()) : 60000;
+        // Never retry earlier than requested; long cooldowns remain unavailable.
+        if (!Number.isFinite(delay) || delay > 60000) break;
+      }
       await response.text();
-      await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+      await new Promise(resolve => setTimeout(resolve, delay));
       retries++;
       response = await request();
     }
     status = response.status;
+    if (status === 429) {
+      await response.text();
+      throw Object.assign(new Error('Git transport rate limited'), { code: 'GIT_RATE_LIMITED' });
+    }
     const text = await response.text();
     let json; try { json = text ? JSON.parse(text) : undefined; } catch { json = undefined; }
     return { status: response.status, json };
