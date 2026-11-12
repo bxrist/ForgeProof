@@ -8,6 +8,20 @@ import { canonical, hash, exact, identifier, signatureValid, classes } from './s
 import { GitAppStateService, IntegrityError, ConflictError } from './store.mjs';
 
 const enc = encodeURIComponent;
+import { bootId } from '../bootIdentity.mjs';
+
+function retryableConnectorError(error) {
+  // Unknown connector errors may retry only within the immutable-read budget.
+  // Inspect denial indicators locally; never emit error text or identifiers.
+  for (let e = error, depth = 0; e && depth < 3; e = e.cause, depth++) {
+    if (e instanceof IntegrityError || e instanceof ConflictError ||
+        [401, 403].includes(e.status ?? e.statusCode ?? e.response?.status) ||
+        /auth|credential|token|identity|permission|forbidden|denied|EACCES|EPERM|config|signer|signature|integrity|checkpoint|tenant|owner|rate.?limit|429|401|403/i.test(
+          `${e.code ?? ''} ${e.name ?? ''} ${e.message ?? ''}`) ||
+        e.code === 'GIT_READ_DEADLINE') return false;
+  }
+  return true;
+}
 
 export class GitHubTransport {
   constructor({ owner, repo, request }) {
@@ -24,19 +38,43 @@ export class GitHubTransport {
       ? `${method}:${resource}` : 'other';
     let status = null;
     let retries = 0;
+    const immutable = method === 'GET' && /^\/git\/(commits|trees|blobs)\//.test(path);
+    let remainingReadMs = 30000;
     try {
-    const request = () => this.request(this.base + path, {
+    const request = async () => {
+      const controller = new AbortController();
+      let timer;
+      const requestStarted = Date.now();
+      try {
+        const pending = this.request(this.base + path, {
       method,
+      ...(immutable ? { signal: controller.signal } : {}),
       headers: { accept: 'application/vnd.github+json', ...(body ? { 'content-type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
-    let response = await request();
+        if (!immutable) return await pending;
+        return await Promise.race([pending, new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            reject(Object.assign(new Error('Git read deadline'), { code: 'GIT_READ_DEADLINE' }));
+            controller.abort();
+          }, Math.max(0, Math.min(15000, remainingReadMs)));
+        })]);
+      } finally { clearTimeout(timer); remainingReadMs -= Date.now() - requestStarted; }
+    };
+    let response;
     // Only immutable reads: never replay a write or retry an integrity failure.
-    for (let attempt = 0; attempt < 2 && method === 'GET' &&
-        /^\/git\/(commits|trees|blobs)\//.test(path) &&
-        [429, 502, 503, 504].includes(response.status); attempt++) {
+    for (;;) {
+      try { response = await request(); }
+      catch (error) {
+        status = null;
+        if (!immutable || retries >= 2 || !retryableConnectorError(error)) throw error;
+        retries++;
+        await new Promise(resolve => setTimeout(resolve, 500 * retries));
+        continue;
+      }
+      if (!immutable || retries >= 2 || ![429, 502, 503, 504].includes(response.status)) break;
       status = response.status;
-      let delay = 250 * (attempt + 1);
+      let delay = 250 * (retries + 1);
       if (status === 429) {
         const header = response.headers?.get?.('retry-after');
         const seconds = header && /^\d+$/.test(header) ? Number(header) : null;
@@ -49,7 +87,6 @@ export class GitHubTransport {
       await response.text();
       await new Promise(resolve => setTimeout(resolve, delay));
       retries++;
-      response = await request();
     }
     status = response.status;
     if (status === 429) {
@@ -61,9 +98,9 @@ export class GitHubTransport {
     return { status: response.status, json };
     } finally {
       const durationMs = Math.round(performance.now() - started);
-      if (durationMs >= 1000 || status === null || status >= 400) {
+      if (durationMs >= 1000 || retries || status === null || status >= 400) {
         console.info('[git-store] Transport timing', JSON.stringify({
-          operation, status, durationMs, retries,
+          operation, status, durationMs, retries, bootId,
         }));
       }
     }
