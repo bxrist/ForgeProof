@@ -20,7 +20,7 @@ vi.mock("stripe-replit-sync", () => ({
   },
 }));
 
-import { getStripeCredentials, getStripeSync, getUncachableStripeClient } from "../server/stripeClient";
+import { getStripeCredentials, getStripeSync, getUncachableStripeClient, withStripeRequestClient } from "../server/stripeClient";
 import { EXPECTED_STRIPE_ACCOUNT_ID } from "../server/stripeConfig";
 
 beforeEach(() => {
@@ -42,6 +42,55 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe("independent Stripe credentials", () => {
+  it("shares one fully guarded client across sequential and concurrent request reads", async () => {
+    await withStripeRequestClient(async () => {
+      const [a, b] = await Promise.all([getUncachableStripeClient(), getUncachableStripeClient()]);
+      expect(a).toBe(b);
+      expect(await getUncachableStripeClient()).toBe(a);
+    });
+    expect(state.retrieve).toHaveBeenCalledTimes(1);
+    expect(state.balance).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("isolates concurrent requests and leaves calls outside a request uncached", async () => {
+    const clients = await Promise.all([1, 2].map(() => withStripeRequestClient(async () => {
+      const first = await getUncachableStripeClient();
+      await Promise.resolve();
+      expect(await getUncachableStripeClient()).toBe(first);
+      return first;
+    })));
+    expect(clients[0]).not.toBe(clients[1]);
+    await getUncachableStripeClient();
+    await getUncachableStripeClient();
+    expect(state.retrieve).toHaveBeenCalledTimes(4);
+    expect(state.balance).toHaveBeenCalledTimes(4);
+  });
+
+  it("never treats an unguarded client as verified", async () => {
+    await withStripeRequestClient(async () => {
+      const unguarded = await getUncachableStripeClient({ skipAccountGuard: true });
+      const guarded = await getUncachableStripeClient();
+      expect(unguarded).not.toBe(guarded);
+      expect(await getUncachableStripeClient()).toBe(guarded);
+    });
+    expect(state.retrieve).toHaveBeenCalledTimes(1);
+    expect(state.balance).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["account", "mode"])("keeps a failed %s check rejected within a request and rechecks next request", async (failure) => {
+    if (failure === "account") state.retrieve.mockResolvedValue({ id: "acct_wrong" });
+    else state.balance.mockResolvedValue({ livemode: true });
+    await withStripeRequestClient(async () => {
+      await expect(getUncachableStripeClient()).rejects.toThrow("mismatch");
+      await expect(getUncachableStripeClient()).rejects.toThrow("mismatch");
+    });
+    expect(state.retrieve).toHaveBeenCalledTimes(1);
+    state.retrieve.mockResolvedValue({ id: EXPECTED_STRIPE_ACCOUNT_ID });
+    state.balance.mockResolvedValue({ livemode: false });
+    await withStripeRequestClient(() => getUncachableStripeClient());
+    expect(state.retrieve).toHaveBeenCalledTimes(2);
+  });
   it("rejects live credentials in sandbox even when the account ID matches", async () => {
     vi.stubEnv("STRIPE_SECRET_KEY", "dummy-independent-key");
     state.balance.mockResolvedValue({ livemode: true });

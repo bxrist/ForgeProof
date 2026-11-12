@@ -19,6 +19,7 @@ import { protectLegacyAuditLog, restoreProtectedAuditLog } from './protected-aud
 import { protectLegacyReceipt, restoreProtectedReceipt } from './protected-receipt.mjs';
 import { redactEvidence } from '../evidenceVisibility';
 import { dashboardAllows, validateDashboardRelations } from './dashboardScope';
+import { lifecycleSchema, signLifecycleEvidence, verifyLifecycleEnvelope, verifyLifecycleGraph, type LifecycleInput, type LifecycleReceipt } from '../lifeosLifecycle';
 
 function stable(v: unknown): string {
   if (Array.isArray(v)) return '['+v.map(stable).join(',')+']';
@@ -118,7 +119,7 @@ export class GitStorage implements IStorage {
         if (!audit || audit.action !== 'put' || audit.record.resourceId !== fingerprint) throw Object.assign(new Error('Idempotency request conflict'), {status:409});
         // Return the original result, even after subsequent updates/cancellation.
         const first = previous.body.operations[0];
-        return (first.action === 'put' ? decode(first.kind === 'receipts' ? JSON.parse(String(first.record.originalCore ?? first.record.original)) : first.kind === 'auditLogs' && first.record.auditCore ? JSON.parse(String(first.record.auditCore)) : first.record) : undefined) as T;
+        return (first.action === 'put' ? first.kind === 'receipts' ? this.recoveredReceipt(first.record, state) : decode(first.kind === 'auditLogs' && first.record.auditCore ? JSON.parse(String(first.record.auditCore)) : first.record) : undefined) as T;
       }
       const guard = state.records.users[this.guardUserId];
       if (!guard) throw new Error('Trusted tenant bootstrap user required');
@@ -301,6 +302,28 @@ export class GitStorage implements IStorage {
   async getSystemAttestations() { return this.members.includes('forgeproof-system') ? this.getAttestations('forgeproof-system') : []; }
   async getAllAttestationsOrdered() { return (await this.receiptOverlay(await this.receipts())).sort((a,b)=>a.id-b.id); }
   async getAttestation(id: number) { return (await this.receiptOverlay(await this.receipts())).find(r=>r.id===id); }
+  private lifecycleReader(state: Replay) {
+    const scope = this.mailBinding();
+    return (id: number): LifecycleReceipt | undefined => {
+      const row = state.records.receipts[id];
+      if (!row) return undefined;
+      if (row.encryption) {
+        if (!this.receiptEncryptionKey) throw new Error('Receipt protection key required');
+        return JSON.parse(restoreProtectedReceipt(row, scope.tenant, scope.repository, this.receiptEncryptionKey).toString('utf8'));
+      }
+      return JSON.parse(String(row.originalCore ?? row.original));
+    };
+  }
+  /** Intentionally public projection: never return unrelated private receipt metadata. */
+  async getPublicLifecycleEvidence(id: number) {
+    const read = this.lifecycleReader(await this.state());
+    const receipt = read(id);
+    if (!receipt || !verifyLifecycleEnvelope(receipt)) return undefined;
+    const verified = verifyLifecycleGraph(id, read);
+    return { verified: true, parentsVerified: true, publicKey: receipt.publicKey,
+      ...verified.evidence, attributionBasis: "authenticated-service-observation",
+      modelAttribution: verified.evidence.payload.model ? "service-observed" : "UNKNOWN" };
+  }
   async getAuthorizedReceiptEvidence(id: number, viewer: string) {
     if (viewer !== this.principal) throw new Error('Receipt evidence access denied');
     const state = await this.state(), row = state.records.receipts[id];
@@ -335,7 +358,7 @@ export class GitStorage implements IStorage {
   }
   async getLatestAttestation() { return (await this.getAllAttestationsOrdered()).at(-1); }
   createAttestation(data: S.InsertAttestationReceipt) { return this.createAttestationAndCount(data,randomUUID()); }
-  async issueAttestationWithSigner(source: Omit<S.InsertAttestationReceipt,'signature'|'publicKey'|'entryHash'|'prevEntryHash'|'createdAt'>, signer: { publicKey: string; sign(input: Buffer): Promise<string> }, requestId: string, verifyNonCommercial?: (state: Replay) => Promise<void>) {
+  async issueAttestationWithSigner(source: Omit<S.InsertAttestationReceipt,'signature'|'publicKey'|'entryHash'|'prevEntryHash'|'createdAt'>, signer: { publicKey: string; sign(input: Buffer): Promise<string> }, requestId: string, verifyNonCommercial?: (state: Replay) => Promise<void>, lifecycle?: LifecycleInput) {
     if (!Buffer.isBuffer(this.receiptEncryptionKey) || this.receiptEncryptionKey.length !== 32)
       throw new Error('Receipt protection key required');
     const encryptionKey = this.receiptEncryptionKey;
@@ -355,9 +378,11 @@ export class GitStorage implements IStorage {
       throw new Error('Explicit signedAt required');
     if (src.gitCommitUrl != null || src.gitCommitMessage != null)
       throw new Error('GitHub export provenance requires a signed annotation');
+    const lifecycleInput = lifecycle === undefined ? undefined : lifecycleSchema.parse(lifecycle);
+    if (lifecycleInput && !verifyNonCommercial) throw new Error('LifeOS scoped authorization required');
     const sourceFingerprint = createHmac('sha256',encryptionKey)
       .update('ForgeProof:atomic-signed-receipt:v1\n')
-      .update(stable(src)).digest('hex');
+      .update(stable(lifecycleInput ? { source: src, lifecycle: lifecycleInput } : src)).digest('hex');
     return this.mutate<S.AttestationReceipt>('attest-atomic-signed-and-count',
       {requestId,requestProof:'hmac-sha256:'+sourceFingerprint}, async state => {
       // Replay contains business state, not signing trust. Trust MUST come
@@ -371,7 +396,6 @@ export class GitStorage implements IStorage {
       if (!Array.isArray(trusted) || !trusted.includes(signer.publicKey))
         throw new Error('Signer key not trusted');
       const sub = Object.values(state.records.subscriptions).find(row=>row.userId===src.userId);
-
       if (!verifyNonCommercial && (!sub || (sub.plan!=='free' && !['active','trialing'].includes(String(sub.status))) ||
           (Number(sub.attestationLimit)!==-1 && Number(sub.attestationCount)>=Number(sub.attestationLimit))))
         throw new Error('Quota or subscription denied');
@@ -381,6 +405,13 @@ export class GitStorage implements IStorage {
         src.fileHash,src.modelName,src.modelProvider,src.countryOfOrigin,previousHash,src.signedAt
       ].join('|')).digest('hex');
       const signature = await signer.sign(Buffer.from([entryHash,src.fileHash,src.signedAt].join('|')));
+      // Resolve and validate parents from the SAME replay used by this atomic append.
+      // CAS retries rebuild both the receipt signature and lifecycle binding.
+      const lifecycleEvidence = lifecycleInput ? await signLifecycleEvidence(
+        lifecycleInput, { id, userId: src.userId, fileHash: src.fileHash, entryHash, publicKey: signer.publicKey },
+        lifecycleInput.parents.map(parent => verifyLifecycleGraph(parent, this.lifecycleReader(state))),
+        bytes => signer.sign(bytes),
+      ) : undefined;
       const original = encode({
         id,userId:src.userId,orgId:src.orgId ?? null,
         repositoryId:src.repositoryId ?? null,fileName:src.fileName,
@@ -398,29 +429,39 @@ export class GitStorage implements IStorage {
         auditDetails:src.auditDetails ?? null,
         gitCommitUrl:null,
         gitCommitMessage:null,
-        metadata:src.metadata ?? null
+        metadata:lifecycleEvidence ? { ...(src.metadata as object ?? {}), lifecycleEvidence } : src.metadata ?? null
       });
       const sealed = protectLegacyReceipt(Buffer.from(JSON.stringify(original)), scope.tenant, scope.repository, encryptionKey);
       const publicView = decode<S.AttestationReceipt>(JSON.parse(sealed.originalCore))!;
+      if (lifecycleEvidence) Object.assign(publicView, { lifecycleEvidence });
       return {operations:[
         this.put(state,'receipts',encode(sealed)),
         ...(!verifyNonCommercial && sub ? [this.put(state,'subscriptions',{...sub,attestationCount:Number(sub.attestationCount)+1})] : [])
       ],result:publicView};
     },requestId,verifyNonCommercial);
   }
-  // Resolve only this principal's existing signed Git event; never append or
-  // infer success from SQL, a receipt ID, or caller-supplied tenant metadata.
+  private recoveredReceipt(record: AppRecord, state: Replay) {
+    const receipt = decode<S.AttestationReceipt>(JSON.parse(String(record.originalCore ?? record.original)))!;
+    // Restore only the signed lifecycle projection, never unrelated private metadata.
+    const original = this.lifecycleReader(state)(receipt.id);
+    if (original?.metadata && typeof original.metadata === 'object' && 'lifecycleEvidence' in original.metadata) {
+      const verified = verifyLifecycleGraph(receipt.id, this.lifecycleReader(state));
+      return { ...receipt, lifecycleEvidence: verified.evidence };
+    }
+    return receipt;
+  }
+  // Resolve this principal's original signed event without append, signing or SQL.
   async getAttestationByRequestId(requestId: string, verifyState: (state: Replay) => Promise<void>) {
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,128}$/.test(requestId))
       throw Object.assign(new Error('Invalid requestId'), {status:400});
-    const state = await this.state(); // Replay verifies Git and receipt signatures.
+    const state = await this.state();
     await verifyState(state);
     const key = digest([this.principal,'attest-atomic-signed-and-count',requestId]);
     const event = state.events.find(e => e.body.idempotencyKey === key);
     const first = event?.body.operations[0];
     if (!first || first.kind !== 'receipts' || first.action !== 'put') return undefined;
-    const receipt = decode<S.AttestationReceipt>(JSON.parse(String(first.record.originalCore ?? first.record.original)));
-    return receipt?.userId === this.principal ? receipt : undefined;
+    const receipt = this.recoveredReceipt(first.record, state);
+    return receipt.userId === this.principal ? receipt : undefined;
   }
   createAttestationAndCount(data: S.InsertAttestationReceipt,key: string) {
     // The source signature is created by the existing trusted ForgeProof signer,

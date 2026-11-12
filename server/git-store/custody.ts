@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { validateLifeosApproval, type LifeosApproval } from '../lifeosApproval';
 
-export type Credential = { kind: 'api-key'; verifier: string; prefix: string } | { kind: 'oidc-session'; material: string } | { kind: 'github-oauth'; material: string };
+export type Credential = { kind: 'api-key'; verifier: string; prefix: string } | { kind: 'oidc-session'; material: string } | { kind: 'github-oauth'; material: string } | { kind: 'lifeos-owner-approval'; approval: Readonly<LifeosApproval> };
 export interface CredentialCustodian {
   /** Stable request IDs and uniqueness are scoped to a trusted tenant store binding. */
   stage(scope: string, request: string, value: Credential): Promise<string>;
@@ -8,6 +9,8 @@ export interface CredentialCustodian {
   destroy(scope: string, ref: string): Promise<void>;
   recoverSession(scope: string, ref: string): Promise<string | undefined>;
   recoverGithubToken(scope: string, ref: string): Promise<string | undefined>;
+  bindLifeosApproval?(scope: string, keyRef: string, binding: Omit<LifeosApproval, 'apiKeyHash'>): Promise<string>;
+  recoverLifeosApproval?(scope: string, ref: string): Promise<Readonly<LifeosApproval> | null>;
 }
 export class UnavailableCustodian implements CredentialCustodian {
   async stage(_s: string, _r: string, _v: Credential): Promise<string> { throw new Error('Secure credential custody unavailable'); }
@@ -71,4 +74,26 @@ export class EncryptedProviderCustodian implements CredentialCustodian {
   destroy(scope: string, ref: string) { return this.transaction(scope, entries=> { const entry=entries.find(e=>e.ref===ref); if(entry) { if(entry.value?.kind==='api-key') entry.retired=entry.value; entry.value=null; } }); }
   recoverSession(scope: string, ref: string) { return this.transaction(scope, entries=> { const value=entries.find(e=>e.ref===ref)?.value; return value?.kind==='oidc-session' ? value.material : undefined; }); }
   recoverGithubToken(scope: string, ref: string) { return this.transaction(scope, entries=> { const value=entries.find(e=>e.ref===ref)?.value; return value?.kind==='github-oauth' ? value.material : undefined; }); }
+  /** Only an opaque reference leaves binding creation; the verifier stays in custody. */
+  bindLifeosApproval(scope: string, keyRef: string, binding: Omit<LifeosApproval, 'apiKeyHash'>) {
+    return this.transaction(scope, entries => {
+      const key = entries.find(e => e.ref === keyRef)?.value;
+      if (key?.kind !== 'api-key') throw new Error('Existing active API credential required');
+      const approval = validateLifeosApproval({ ...binding, apiKeyHash: key.verifier });
+      if (!approval) throw new Error('Invalid LifeOS binding');
+      const existing = entries.find(e => e.value?.kind === 'lifeos-owner-approval' &&
+        equal(JSON.stringify({ ...e.value.approval, approvedAt: null }), JSON.stringify({ ...approval, approvedAt: null })));
+      if (existing) return existing.ref;
+      const ref = 'custodian:' + randomUUID();
+      entries.push({ ref, request: 'lifeos-approval:' + randomUUID(), value: { kind: 'lifeos-owner-approval', approval } });
+      return ref;
+    });
+  }
+  /** Server bootstrap only; never surfaced by an HTTP credential or audit view. */
+  recoverLifeosApproval(scope: string, ref: string) {
+    return this.transaction(scope, entries => {
+      const value = entries.find(e => e.ref === ref)?.value;
+      return value?.kind === 'lifeos-owner-approval' ? validateLifeosApproval(value.approval) : null;
+    });
+  }
 }

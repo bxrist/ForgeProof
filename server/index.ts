@@ -9,6 +9,7 @@ import { startReceiptOutboxWorker } from "./receiptOutbox";
 import { requestLogLine } from "./requestLog";
 import { hasApplicationStorage, requestStorageScope } from "./storageBackend";
 import { initializeApplicationStorage } from "./git-store/applicationRuntime";
+import { withStripeRequestClient } from "./stripeClient";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -24,7 +25,20 @@ declare module "http" {
 app.post(
   "/api/stripe/webhook",
   express.raw({ type: "application/json" }),
+  (_req, _res, next) => withStripeRequestClient(next),
   async (req, res) => {
+    const started = performance.now();
+    let verificationMs = 0;
+    let handlingMs = 0;
+    let stage = "signature_and_ownership";
+    res.once("finish", () => {
+      console.info("[stripe] Webhook timing", JSON.stringify({
+        status: res.statusCode, stage,
+        totalMs: Math.round(performance.now() - started),
+        verificationMs: Math.round(verificationMs),
+        handlingMs: Math.round(handlingMs),
+      }));
+    });
     const signature = req.headers["stripe-signature"];
     if (!signature) {
       return res.status(400).json({ error: "Missing stripe-signature" });
@@ -32,9 +46,16 @@ app.post(
     try {
       const sig = Array.isArray(signature) ? signature[0] : signature;
       const { WebhookHandlers } = await import("./webhookHandlers");
-      const owned = await WebhookHandlers.processWebhook(req.body as Buffer, sig);
+      let owned: boolean;
+      try {
+        owned = await WebhookHandlers.processWebhook(req.body as Buffer, sig);
+      } finally {
+        verificationMs = performance.now() - started;
+      }
       if (!owned) return res.status(200).json({ received: true, ignored: true });
 
+      stage = "application_handling";
+      const handlingStarted = performance.now();
       try {
         const event = JSON.parse((req.body as Buffer).toString("utf8"));
         const { handleStripeEvent } = await import("./stripe");
@@ -42,8 +63,11 @@ app.post(
       } catch (e) {
         console.error("Stripe event handling error:", e);
         return res.status(500).json({ error: "Event processing failed" });
+      } finally {
+        handlingMs = performance.now() - handlingStarted;
       }
 
+      stage = "complete";
       res.status(200).json({ received: true });
     } catch (error: any) {
       console.error("Webhook error:", error.message);

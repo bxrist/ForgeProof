@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useUser, useClerk, useAuth } from "@clerk/react";
+import { useUser, useClerk } from "@clerk/react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -63,7 +63,6 @@ import { HistoricalInventory } from "@/components/HistoricalInventory";
 import { RuntimeVerificationChecklist } from "@/components/RuntimeVerificationChecklist";
 import { ReceiptClaims } from "@/components/ReceiptClaims";
 import { useAppPrincipal } from "@/hooks/use-provenance";
-import { StripeReadinessLink } from "@/components/StripeReadinessLink";
 import { logicalReceiptKey, redactMetadata } from "@/lib/provenance";
 import { declarationSummary } from "@shared/receiptPresentation";
 import { GitHubAppPanel } from "@/components/GitHubAppPanel";
@@ -1071,7 +1070,6 @@ function BillingTab({ apiKeyCount }: { apiKeyCount: number }) {
 
 export default function DashboardPage() {
   const { user, isLoaded } = useUser();
-  const { userId: clerkUserId, sessionId } = useAuth();
   const authLoading = !isLoaded;
   const { signOut } = useClerk();
   const logout = () => signOut({ redirectUrl: import.meta.env.BASE_URL });
@@ -1405,10 +1403,6 @@ export default function DashboardPage() {
                 </Avatar>
                 <span className="text-sm font-medium">{user.firstName || user.primaryEmailAddress?.emailAddress || "User"}</span>
               </div>
-              <StripeReadinessLink identity={
-                isLoaded && user?.id === clerkUserId && sessionId
-                  ? `${clerkUserId}:${sessionId}` : null
-              } />
               <Button
                 variant="ghost"
                 size="icon"

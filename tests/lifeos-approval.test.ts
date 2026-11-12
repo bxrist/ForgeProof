@@ -17,6 +17,15 @@ afterEach(() => {
 });
 
 describe("LifeOS approval", () => {
+  it.each(["57", "invalid"])("never loads legacy approval when Git selector %s is supplied", async selector => {
+    vi.resetModules();
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("LIFEOS_OWNER_APPROVAL_AUDIT_ID", selector);
+    vi.stubEnv("LIFEOS_OWNER_APPROVAL_JSON", JSON.stringify(validApproval));
+    vi.stubEnv("LIFEOS_OWNER_APPROVAL_FILE", "/obsolete/unreadable-approval.json");
+    const { lifeosApproval } = await import("../server/lifeosApproval");
+    expect(lifeosApproval).toBeNull();
+  });
   it("accepts only a valid, separately owner-approved record", async () => {
     const { validateLifeosApproval } = await import("../server/lifeosApproval");
     expect(validateLifeosApproval(validApproval, Date.parse("2026-11-05T00:00:00Z"))).toMatchObject(validApproval);
@@ -41,5 +50,13 @@ describe("LifeOS approval", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("LIFEOS_OWNER_APPROVAL_FILE", "/tmp/approval.json");
     expect((await import("../server/lifeosApproval")).lifeosApproval).toBeNull();
+  });
+  it("accepts explicit project scope without breaking legacy origin approval", async () => {
+    const { validateLifeosApproval } = await import("../server/lifeosApproval");
+    expect(validateLifeosApproval(validApproval)).not.toBeNull();
+    expect(validateLifeosApproval({ ...validApproval, projects: ["owner/lifeos", "owner/another-project"] })?.projects)
+      .toEqual(["owner/lifeos", "owner/another-project"]);
+    for (const projects of [[], ["*"], ["../project"], ["owner/repo", "owner/repo"], "owner/repo"])
+      expect(validateLifeosApproval({ ...validApproval, projects })).toBeNull();
   });
 });

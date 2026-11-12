@@ -16,6 +16,15 @@ export class GitHubTransport {
     this.request = request; // (path, {method, body}) => Response-like
   }
   async call(path, method = 'GET', body) {
+    const started = performance.now();
+    // Fixed operation labels only: never log repository/ref names, hashes,
+    // request bodies, response bodies, credentials, or exception messages.
+    const resource = /^\/git\/(commits|trees|blobs|refs?)(?:\/|$)/.exec(path)?.[1];
+    const operation = ['GET', 'POST', 'PATCH'].includes(method) && resource
+      ? `${method}:${resource}` : 'other';
+    let status = null;
+    let retries = 0;
+    try {
     const request = () => this.request(this.base + path, {
       method,
       headers: { accept: 'application/vnd.github+json', ...(body ? { 'content-type': 'application/json' } : {}) },
@@ -28,11 +37,21 @@ export class GitHubTransport {
         [502, 503, 504].includes(response.status); attempt++) {
       await response.text();
       await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+      retries++;
       response = await request();
     }
+    status = response.status;
     const text = await response.text();
     let json; try { json = text ? JSON.parse(text) : undefined; } catch { json = undefined; }
     return { status: response.status, json };
+    } finally {
+      const durationMs = Math.round(performance.now() - started);
+      if (durationMs >= 1000 || status === null || status >= 400) {
+        console.info('[git-store] Transport timing', JSON.stringify({
+          operation, status, durationMs, retries,
+        }));
+      }
+    }
   }
   async ref(ref) {
     const { status, json } = await this.call(`/git/ref/${ref.replace(/^refs\//, '').split('/').map(enc).join('/')}`);

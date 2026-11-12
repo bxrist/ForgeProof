@@ -20,7 +20,6 @@ import SdkPage from "@/pages/sdk";
 import AnalyticsPage from "@/pages/analytics";
 import ThreatModelPage from "@/pages/threat-model";
 import GlossaryPage from "@/pages/glossary";
-import AdminStripePage from "@/pages/admin-stripe";
 
 function Router() {
   return (
@@ -41,7 +40,6 @@ function Router() {
       <Route path="/analytics" component={AnalyticsPage} />
       <Route path="/threat-model" component={ThreatModelPage} />
       <Route path="/glossary" component={GlossaryPage} />
-      <Route path="/admin/stripe"><ProtectedPage><AdminStripePage /></ProtectedPage></Route>
       <Route component={NotFound} />
     </Switch>
   );

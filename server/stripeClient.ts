@@ -1,4 +1,5 @@
 import Stripe from 'stripe';
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { StripeSync } from 'stripe-replit-sync';
 import { EXPECTED_STRIPE_ACCOUNT_ID, STRIPE_LIVE_MODE } from "./stripeConfig";
 
@@ -90,13 +91,30 @@ async function assertExpectedStripeAccount(stripe: Stripe): Promise<void> {
   if (balance.livemode !== STRIPE_LIVE_MODE) throw new Error("Stripe mode mismatch");
 }
 
-export async function getUncachableStripeClient(options?: { skipAccountGuard?: boolean }): Promise<Stripe> {
+const requestClients = new AsyncLocalStorage<{ guarded?: Promise<Stripe> }>();
+
+/** Reuse only the account/mode-verified client within one webhook request.
+ * No customer, subscription, entitlement or authorization results are cached.
+ * Every new request gets fresh credentials and provider identity verification.
+ */
+export function withStripeRequestClient<T>(callback: () => T): T {
+  return requestClients.run({}, callback);
+}
+
+async function createStripeClient(options?: { skipAccountGuard?: boolean }): Promise<Stripe> {
   const { secretKey } = await getStripeCredentials();
   const stripe = new Stripe(secretKey);
   if (!options?.skipAccountGuard) {
     await assertExpectedStripeAccount(stripe);
   }
   return stripe;
+}
+
+export async function getUncachableStripeClient(options?: { skipAccountGuard?: boolean }): Promise<Stripe> {
+  const request = requestClients.getStore();
+  // Unguarded clients must never populate or reuse the verified-client slot.
+  if (!request || options?.skipAccountGuard) return createStripeClient(options);
+  return request.guarded ??= createStripeClient();
 }
 
 export async function getStripeSync(): Promise<StripeSync> {
