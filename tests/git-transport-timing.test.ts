@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 // @ts-ignore Existing runtime module is JavaScript.
 import { GitHubTransport } from "../server/git-store/github-store.mjs";
+import { bootId } from "../server/bootIdentity.mjs";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -14,7 +15,7 @@ describe("safe Git transport timing", () => {
       .toEqual({ status: 201, json: { sha: "private-response" } });
     expect(request).toHaveBeenCalledTimes(1);
     expect(log).toHaveBeenCalledWith("[git-store] Transport timing",
-      JSON.stringify({ operation: "POST:blobs", status: 201, durationMs: 1500, retries: 0 }));
+      JSON.stringify({ operation: "POST:blobs", status: 201, durationMs: 1500, retries: 0, bootId }));
     expect(JSON.stringify(log.mock.calls)).not.toContain("private");
   });
 

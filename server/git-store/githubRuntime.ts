@@ -46,7 +46,7 @@ export function signerMaterial() {
   };
 }
 
-export async function connectorRequest(path: string, init: { method?: string; headers?: Record<string, string>; body?: string }) {
+export async function connectorRequest(path: string, init: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal }) {
   const { ReplitConnectors } = await diagnosticPhase("connector_import", () => import("@replit/connectors-sdk"));
   const client = await diagnosticPhase("connector_setup", async () => new ReplitConnectors());
   return diagnosticPhase("connector_proxy", () => client.proxy("github", path, init as any) as Promise<Response>);

@@ -1,8 +1,7 @@
-import { randomUUID } from "node:crypto";
+import { bootId } from "./bootIdentity.mjs";
 import { IntegrityError } from "./git-store/store.mjs";
 
-const bootId = randomUUID();
-const codes = new Set(["GIT_RATE_LIMITED", "ETIMEDOUT", "ECONNRESET", "ECONNREFUSED",
+const codes = new Set(["GIT_RATE_LIMITED", "GIT_READ_DEADLINE", "ETIMEDOUT", "ECONNRESET", "ECONNREFUSED",
   "ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT",
   "UND_ERR_SOCKET", "ABORT_ERR", "ERR_MODULE_NOT_FOUND"]);
 type Phase = "listen" | "storage" | "routes" | "assets" | "ready" |
