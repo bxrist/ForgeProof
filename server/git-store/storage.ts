@@ -106,15 +106,16 @@ export class GitStorage implements IStorage {
     return { kind,id:record.id,action:'put',expectedVersion:state.versions[`${kind}/${record.id}`] ?? null,record };
   }
   private del(state: Replay, kind: RecordClass,id: number): Operation { return {kind,id,action:'delete',expectedVersion:state.versions[`${kind}/${id}`] ?? null}; }
-  private async mutate<T>(label: string, input: unknown, build: (state: Replay) => ({ operations: Operation[]; result: T } | Promise<{ operations: Operation[]; result: T }>), key: string = randomUUID()): Promise<T> {
+  private async mutate<T>(label: string, input: unknown, build: (state: Replay) => ({ operations: Operation[]; result: T } | Promise<{ operations: Operation[]; result: T }>), key: string = randomUUID(), verifyState?: (state: Replay) => Promise<void>): Promise<T> {
     const idempotencyKey = digest([this.principal,label,key]);
     const fingerprint = digest([label,encode(input)]);
     for (let attempt=0; attempt<8; attempt++) {
       const state = await this.state();
+      if (verifyState) await verifyState(state);
       const previous = state.events.find(e => e.body.idempotencyKey === idempotencyKey);
       if (previous) {
         const audit = previous.body.operations.find(o => o.kind === 'auditLogs' && o.action === 'put' && o.record.resourceType === 'storage-request');
-        if (!audit || audit.action !== 'put' || audit.record.resourceId !== fingerprint) throw new Error('Idempotency request conflict');
+        if (!audit || audit.action !== 'put' || audit.record.resourceId !== fingerprint) throw Object.assign(new Error('Idempotency request conflict'), {status:409});
         // Return the original result, even after subsequent updates/cancellation.
         const first = previous.body.operations[0];
         return (first.action === 'put' ? decode(first.kind === 'receipts' ? JSON.parse(String(first.record.originalCore ?? first.record.original)) : first.kind === 'auditLogs' && first.record.auditCore ? JSON.parse(String(first.record.auditCore)) : first.record) : undefined) as T;
@@ -370,7 +371,7 @@ export class GitStorage implements IStorage {
       if (!Array.isArray(trusted) || !trusted.includes(signer.publicKey))
         throw new Error('Signer key not trusted');
       const sub = Object.values(state.records.subscriptions).find(row=>row.userId===src.userId);
-      if (verifyNonCommercial) await verifyNonCommercial(state);
+
       if (!verifyNonCommercial && (!sub || (sub.plan!=='free' && !['active','trialing'].includes(String(sub.status))) ||
           (Number(sub.attestationLimit)!==-1 && Number(sub.attestationCount)>=Number(sub.attestationLimit))))
         throw new Error('Quota or subscription denied');
@@ -405,7 +406,21 @@ export class GitStorage implements IStorage {
         this.put(state,'receipts',encode(sealed)),
         ...(!verifyNonCommercial && sub ? [this.put(state,'subscriptions',{...sub,attestationCount:Number(sub.attestationCount)+1})] : [])
       ],result:publicView};
-    },requestId);
+    },requestId,verifyNonCommercial);
+  }
+  // Resolve only this principal's existing signed Git event; never append or
+  // infer success from SQL, a receipt ID, or caller-supplied tenant metadata.
+  async getAttestationByRequestId(requestId: string, verifyState: (state: Replay) => Promise<void>) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,128}$/.test(requestId))
+      throw Object.assign(new Error('Invalid requestId'), {status:400});
+    const state = await this.state(); // Replay verifies Git and receipt signatures.
+    await verifyState(state);
+    const key = digest([this.principal,'attest-atomic-signed-and-count',requestId]);
+    const event = state.events.find(e => e.body.idempotencyKey === key);
+    const first = event?.body.operations[0];
+    if (!first || first.kind !== 'receipts' || first.action !== 'put') return undefined;
+    const receipt = decode<S.AttestationReceipt>(JSON.parse(String(first.record.originalCore ?? first.record.original)));
+    return receipt?.userId === this.principal ? receipt : undefined;
   }
   createAttestationAndCount(data: S.InsertAttestationReceipt,key: string) {
     // The source signature is created by the existing trusted ForgeProof signer,

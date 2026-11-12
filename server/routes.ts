@@ -5,6 +5,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import rateLimit from "express-rate-limit";
 import { storage } from "./storage";
 import { currentApplicationStorage, setVerifiedStoragePrincipal } from "./storageBackend";
+import { registerLifeosAttestationRoutes } from "./lifeosAttestationRoutes.mjs";
 import type { GitStorage } from "./git-store/storage";
 import { randomUUID } from "node:crypto";
 import { registerDashboardAccessRoutes } from "./dashboardAccess";
@@ -189,7 +190,8 @@ async function createAttestationReceipt(
   data: { file_path: string; file_hash: string; file_name?: string; model_name: string; model_provider: string; country_of_origin: string; metadata?: any; attestation_type?: string; parent_attestation_id?: number; audit_verdict?: string; audit_details?: string },
   detectedCountry: string | null,
   repositoryId?: number,
-  lifeosProof?: LifeosProof
+  lifeosProof?: LifeosProof,
+  identity?: { requestId: string; signedAt: string }
 ) {
   const subscription = lifeosProof ? null : await storage.getOrCreateFreeSubscription(userId);
 
@@ -205,13 +207,15 @@ async function createAttestationReceipt(
       countryOfOrigin:data.country_of_origin, detectedCountry, complianceStatus,
       attestationType:data.attestation_type ?? "origin", parentAttestationId:data.parent_attestation_id ?? null,
       auditVerdict:data.audit_verdict ?? null, auditDetails:data.audit_details ?? null,
-      metadata:data.metadata ?? null, receiptVersion:"v1", signedAt:new Date().toISOString(),
-    }, {publicKey, sign:async bytes=>signData(bytes.toString("utf8"))}, randomUUID(), lifeosProof ? async state=>{
+      metadata:data.metadata ?? null, receiptVersion:"v1", signedAt:identity?.signedAt ?? new Date().toISOString(),
+    }, {publicKey, sign:async bytes=>signData(bytes.toString("utf8"))}, identity?.requestId ?? randomUUID(), lifeosProof ? async state=>{
       const row=state.records.apiKeys[lifeosProof.apiKeyId];
       const matches=!!row && await gitStorage.custody.matches(gitStorage.custodyScope,String(row.credentialRef),lifeosProof.keyHash);
       verifyLifeosGitState(lifeosProof,userId,state,matches);
     } : undefined);
   }
+
+  if (identity) throw Object.assign(new Error("Durable Git storage required"), {status:503});
 
   const { drizzle } = await import("drizzle-orm/node-postgres");
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -344,27 +348,14 @@ export async function registerRoutes(
 ): Promise<Server> {
   app.use("/api", restrictLifeosServiceWrites);
 
-  app.post("/api/lifeos/attest", publicApiLimiter, async (req, res) => {
-    try {
-      const proof = await proveLifeosControl(req.headers.authorization);
-      const parsed = attestRequestSchema.safeParse(req.body);
-      if (!parsed.success) return res.status(400).json({ message: "Invalid attestation request" });
-      // First scope is a standalone origin receipt, not cross-tenant audit/lineage.
-      if ((parsed.data.attestation_type && parsed.data.attestation_type !== "origin") ||
-          parsed.data.parent_attestation_id || parsed.data.repository) {
-        return res.status(400).json({ message: "LifeOS service accepts standalone origin receipts only" });
-      }
-      const receipt = await createAttestationReceipt(
-        proof.userId,
-        { ...parsed.data, metadata: { ...parsed.data.metadata, source: "lifeos_service", metering: "internal" } },
-        detectCountryFromRequest(req), undefined, proof,
-      );
-      return res.status(201).json({ ...receipt, metering: "internal" });
-    } catch (error: any) {
-      return res.status(error.status || 500).json({
-        message: error.status === 403 ? error.message : "LifeOS attestation failed",
-      });
-    }
+  registerLifeosAttestationRoutes(app, {
+    limiter: publicApiLimiter,
+    proveControl: proveLifeosControl,
+    getStorage: () => currentApplicationStorage() as GitStorage | undefined,
+    parseBody: (body: unknown) => attestRequestSchema.safeParse(body),
+    createReceipt: createAttestationReceipt,
+    detectCountry: detectCountryFromRequest,
+    verifyState: verifyLifeosGitState,
   });
 
   // ─── Auth ─────────────────────────────────────────
