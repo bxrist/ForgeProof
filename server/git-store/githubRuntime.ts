@@ -2,6 +2,7 @@ import { createPrivateKey, createPublicKey, hkdfSync, sign } from "node:crypto";
 import { normalizedSignerPem, configuredSignerSecrets } from "../crypto";
 import { GitHubAppStateService, GitHubCredentialVault, GitHubTransport } from "./github-store.mjs";
 import { EncryptedProviderCustodian } from "./custody";
+import { diagnosticPhase } from "../startupDiagnostics";
 
 /**
  * Production Git store: private GitHub repository reached through the project's
@@ -46,9 +47,9 @@ export function signerMaterial() {
 }
 
 export async function connectorRequest(path: string, init: { method?: string; headers?: Record<string, string>; body?: string }) {
-  const { ReplitConnectors } = await import("@replit/connectors-sdk");
-  const client = new ReplitConnectors();
-  return client.proxy("github", path, init as any) as Promise<Response>;
+  const { ReplitConnectors } = await diagnosticPhase("connector_import", () => import("@replit/connectors-sdk"));
+  const client = await diagnosticPhase("connector_setup", async () => new ReplitConnectors());
+  return diagnosticPhase("connector_proxy", () => client.proxy("github", path, init as any) as Promise<Response>);
 }
 
 export function createGitHubStore(env = process.env, request = connectorRequest) {
