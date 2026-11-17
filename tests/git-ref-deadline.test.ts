@@ -3,22 +3,18 @@ import { GitHubTransport } from "../server/git-store/github-store.mjs";
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
-it("bounds a hung ref read, aborts it once, and allows a fresh later read", async () => {
+it("allows a mutable ref read to complete beyond the immutable read deadline without retry", async () => {
   vi.useFakeTimers();
-  const log = vi.spyOn(console, "info").mockImplementation(() => {});
-  const request = vi.fn().mockImplementationOnce(() => new Promise(() => {}))
-    .mockResolvedValue(new Response(JSON.stringify({ ref: "refs/heads/private", object: { type: "commit", sha: "a".repeat(40) } })));
+  vi.spyOn(console, "info").mockImplementation(() => {});
+  const request = vi.fn((_path: string, _options: any) => new Promise(resolve => setTimeout(() => resolve(
+    new Response(JSON.stringify({ ref: "refs/heads/private", object: { type: "commit", sha: "a".repeat(40) } }))
+  ), 31000)));
   const transport = new GitHubTransport({ owner: "private-owner", repo: "private-repo", request });
-  const assertion = expect(transport.ref("refs/heads/private")).rejects.toMatchObject({ code: "GIT_READ_DEADLINE" });
-  await vi.advanceTimersByTimeAsync(14999);
-  expect(request.mock.calls[0][1].signal.aborted).toBe(false);
-  await vi.advanceTimersByTimeAsync(1);
-  await assertion;
+  const result = transport.ref("refs/heads/private");
+  await vi.advanceTimersByTimeAsync(31000);
+  expect(await result).toBe("a".repeat(40));
   expect(request).toHaveBeenCalledTimes(1);
-  expect(request.mock.calls[0][1].signal.aborted).toBe(true);
-  expect(JSON.stringify(log.mock.calls)).not.toContain("private");
-  expect(await transport.ref("refs/heads/private")).toBe("a".repeat(40));
-  expect(request).toHaveBeenCalledTimes(2);
+  expect(request.mock.calls[0][1].signal).toBeUndefined();
 });
 
 it.each([401, 403, 429, 503])("does not retry a ref response with status %s", async status => {
