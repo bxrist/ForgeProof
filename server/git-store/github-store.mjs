@@ -39,6 +39,9 @@ export class GitHubTransport {
     let status = null;
     let retries = 0;
     const immutable = method === 'GET' && /^\/git\/(commits|trees|blobs)\//.test(path);
+    // A mutable ref must be fresh, but must not hold replay's exclusive queue
+    // indefinitely. Bound reads without extending immutable-only retry policy.
+    const boundedRead = immutable || (method === 'GET' && /^\/git\/refs?\//.test(path));
     let remainingReadMs = 30000;
     try {
     const request = async () => {
@@ -48,11 +51,11 @@ export class GitHubTransport {
       try {
         const pending = this.request(this.base + path, {
       method,
-      ...(immutable ? { signal: controller.signal } : {}),
+      ...(boundedRead ? { signal: controller.signal } : {}),
       headers: { accept: 'application/vnd.github+json', ...(body ? { 'content-type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
-        if (!immutable) return await pending;
+        if (!boundedRead) return await pending;
         return await Promise.race([pending, new Promise((_, reject) => {
           timer = setTimeout(() => {
             reject(Object.assign(new Error('Git read deadline'), { code: 'GIT_READ_DEADLINE' }));

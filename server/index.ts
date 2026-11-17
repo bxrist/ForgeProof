@@ -13,6 +13,7 @@ import { withStripeRequestClient } from "./stripeClient";
 
 import { createStartupBarrier } from "./startupBarrier";
 import { reportStartupDiagnostic } from "./startupDiagnostics";
+import { gitAvailabilityError } from "./middlewares/gitAvailabilityError";
 
 const app = express();
 const startupBarrier = createStartupBarrier();
@@ -161,6 +162,7 @@ httpServer.on("error", failStartup);
     console.error("Seed error:", e);
   }
 
+  app.use(gitAvailabilityError);
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
