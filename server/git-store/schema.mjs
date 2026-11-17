@@ -27,6 +27,7 @@ export function signatureValid(payload, signature, publicKey) {
 const common = 'createdAt updatedAt';
 // All credentials, session content, arbitrary metadata and billing instrument data are excluded.
 const fields = {
+  projectServices: 'id userId ownerId tenantKey project sourceRepositoryId credentialRef permissions expiresAt active createdAt',
   users: `id email firstName lastName profileImageUrl githubUsername githubTokenRef notificationEmail notifyOnGitFailure stripeCustomerId defaultRepoId detailRepoId lastActiveTab credentialRef ${common}`,
   repositories: `id userId orgId githubId name fullName url defaultBranch description lastSyncedAt ${common}`,
   organizations: `id name slug ownerId description ${common}`,
@@ -48,6 +49,20 @@ const numbers = new Set('orgId githubId repositoryId attestationLimit attestatio
 const receiptCommitUrl = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/commit\/([a-f0-9]{40}|[a-f0-9]{64})$/;
 export function validateRecord(kind, record) {
   if (!classes.includes(kind)) throw new Error('Unknown record class');
+  if (kind === 'projectServices') {
+    exact(record, fields[kind].split(' '));
+    identifier(record.id); identifier(record.userId); identifier(record.ownerId);
+    if (record.userId !== `project-service-${record.id}` || record.userId === record.ownerId ||
+        record.tenantKey !== `user:${record.ownerId}` ||
+        !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(record.project) ||
+        !/^custodian:[a-zA-Z0-9_-]{1,128}$/.test(record.credentialRef) ||
+        record.permissions !== 'attest:write' || typeof record.active !== 'boolean' ||
+        !Number.isFinite(Date.parse(record.expiresAt)) || !Number.isFinite(Date.parse(record.createdAt)) ||
+        Date.parse(record.expiresAt) <= Date.parse(record.createdAt))
+      throw new Error('Invalid project service binding');
+    positive(record.sourceRepositoryId);
+    return;
+  }
   if (kind === 'githubApp') {
     exact(record, ['id','category','ownerId','data','updatedAt']);
     identifier(record.id);

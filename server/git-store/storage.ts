@@ -20,6 +20,7 @@ import { protectLegacyReceipt, restoreProtectedReceipt } from './protected-recei
 import { redactEvidence } from '../evidenceVisibility';
 import { dashboardAllows, validateDashboardRelations } from './dashboardScope';
 import { lifecycleSchema, signLifecycleEvidence, verifyLifecycleEnvelope, verifyLifecycleGraph, type LifecycleInput, type LifecycleReceipt } from '../lifeosLifecycle';
+import { projectDenied, publicProjectBinding, validateProjectBinding } from '../projectServicePolicy';
 
 function stable(v: unknown): string {
   if (Array.isArray(v)) return '['+v.map(stable).join(',')+']';
@@ -43,6 +44,51 @@ export class GitStorage implements IStorage {
     if (!members.length || !members.includes(principal) || !members.includes(guardUserId)) throw new Error('Tenant authorization denied');
   }
   private authorize(id: string) { if (!this.members.includes(id)) throw new Error('Tenant authorization denied'); }
+  async listProjectServices() {
+    return Object.values((await this.state()).records.projectServices)
+      .filter(r => r.ownerId === this.principal).map(publicProjectBinding);
+  }
+  async enrollProjectService(input: { id: string; repositoryId: number; project: string; expiresAt: string; verifier: string; prefix: string }) {
+    // The route separately proves repository administration through the owner's
+    // existing GitHub connection. Never infer external ownership from a name.
+    const credentialRef = await this.custody.stage(this.custodyBinding(),
+      `project:${this.principal}:${input.id}`, {kind:'api-key', verifier:input.verifier, prefix:input.prefix});
+    const { verifier: _verifier, prefix: _prefix, ...safe } = input;
+    const row = await this.mutate<AppRecord>('project-service-enroll', safe, state => {
+      const repository = state.records.repositories[input.repositoryId];
+      if (!repository || repository.userId !== this.principal || repository.fullName !== input.project ||
+          state.records.projectServices[input.id] || !state.records.users[this.principal] ||
+          !Number.isFinite(Date.parse(input.expiresAt)) || Date.parse(input.expiresAt) <= Date.now())
+        projectDenied();
+      const userId = `project-service-${input.id}`;
+      if (state.records.users[userId]) projectDenied();
+      const binding = {id:input.id,userId,ownerId:this.principal,tenantKey:`user:${this.principal}`,
+        project:input.project,sourceRepositoryId:input.repositoryId,credentialRef,
+        permissions:'attest:write',active:true,expiresAt:input.expiresAt,createdAt:new Date().toISOString()};
+      return {operations:[this.put(state,'projectServices',binding),this.put(state,'users',{id:userId})],result:binding};
+    }, input.id);
+    return publicProjectBinding(row);
+  }
+  async revokeProjectService(id: string) {
+    await this.mutate('project-service-revoke',{id},state=>{
+      const row=state.records.projectServices[id];
+      if (!row || row.ownerId!==this.principal) projectDenied();
+      return {operations:[this.put(state,'projectServices',{...row,active:false})],result:undefined};
+    });
+  }
+  async authenticateProjectService(id: string, verifier: string) {
+    const state=await this.state(), binding=state.records.projectServices[id];
+    if (!binding) projectDenied();
+    validateProjectBinding(state,binding);
+    if (!await this.custody.matches(this.custodyBinding(),String(binding.credentialRef),verifier)) projectDenied();
+    return publicProjectBinding(binding);
+  }
+  async verifyProjectService(state: Replay, id: string, verifier: string, project: string) {
+    const binding=state.records.projectServices[id];
+    if (!binding || binding.userId!==this.principal || binding.project!==project) projectDenied();
+    validateProjectBinding(state,binding);
+    if (!await this.custody.matches(this.custodyBinding(),String(binding.credentialRef),verifier)) projectDenied();
+  }
   private async state() {
     const state = await this.service.replay();
     this.validate(state);
@@ -358,7 +404,7 @@ export class GitStorage implements IStorage {
   }
   async getLatestAttestation() { return (await this.getAllAttestationsOrdered()).at(-1); }
   createAttestation(data: S.InsertAttestationReceipt) { return this.createAttestationAndCount(data,randomUUID()); }
-  async issueAttestationWithSigner(source: Omit<S.InsertAttestationReceipt,'signature'|'publicKey'|'entryHash'|'prevEntryHash'|'createdAt'>, signer: { publicKey: string; sign(input: Buffer): Promise<string> }, requestId: string, verifyNonCommercial?: (state: Replay) => Promise<void>, lifecycle?: LifecycleInput) {
+  async issueAttestationWithSigner(source: Omit<S.InsertAttestationReceipt,'signature'|'publicKey'|'entryHash'|'prevEntryHash'|'createdAt'>, signer: { publicKey: string; sign(input: Buffer): Promise<string> }, requestId: string, verifyNonCommercial?: (state: Replay) => Promise<void>, lifecycle?: LifecycleInput, projectAuthorization?: { id: string; verifier: string }) {
     if (!Buffer.isBuffer(this.receiptEncryptionKey) || this.receiptEncryptionKey.length !== 32)
       throw new Error('Receipt protection key required');
     const encryptionKey = this.receiptEncryptionKey;
@@ -379,7 +425,8 @@ export class GitStorage implements IStorage {
     if (src.gitCommitUrl != null || src.gitCommitMessage != null)
       throw new Error('GitHub export provenance requires a signed annotation');
     const lifecycleInput = lifecycle === undefined ? undefined : lifecycleSchema.parse(lifecycle);
-    if (lifecycleInput && !verifyNonCommercial) throw new Error('LifeOS scoped authorization required');
+    if (lifecycleInput && !verifyNonCommercial && !projectAuthorization) throw new Error('Scoped lifecycle authorization required');
+    if (projectAuthorization && (verifyNonCommercial || !lifecycleInput)) projectDenied();
     const sourceFingerprint = createHmac('sha256',encryptionKey)
       .update('ForgeProof:atomic-signed-receipt:v1\n')
       .update(stable(lifecycleInput ? { source: src, lifecycle: lifecycleInput } : src)).digest('hex');
@@ -395,7 +442,8 @@ export class GitStorage implements IStorage {
       const trusted = service.trust?.receiptKeys ?? service.options?.trust?.receiptKeys;
       if (!Array.isArray(trusted) || !trusted.includes(signer.publicKey))
         throw new Error('Signer key not trusted');
-      const sub = Object.values(state.records.subscriptions).find(row=>row.userId===src.userId);
+      const billingOwner = projectAuthorization ? state.records.projectServices[projectAuthorization.id]?.ownerId : src.userId;
+      const sub = Object.values(state.records.subscriptions).find(row=>row.userId===billingOwner);
       if (!verifyNonCommercial && (!sub || (sub.plan!=='free' && !['active','trialing'].includes(String(sub.status))) ||
           (Number(sub.attestationLimit)!==-1 && Number(sub.attestationCount)>=Number(sub.attestationLimit))))
         throw new Error('Quota or subscription denied');
@@ -438,7 +486,9 @@ export class GitStorage implements IStorage {
         this.put(state,'receipts',encode(sealed)),
         ...(!verifyNonCommercial && sub ? [this.put(state,'subscriptions',{...sub,attestationCount:Number(sub.attestationCount)+1})] : [])
       ],result:publicView};
-    },requestId,verifyNonCommercial);
+    },requestId,projectAuthorization ? async state => {
+      await this.verifyProjectService(state,projectAuthorization.id,projectAuthorization.verifier,lifecycleInput!.project);
+    } : verifyNonCommercial);
   }
   private recoveredReceipt(record: AppRecord, state: Replay) {
     const receipt = decode<S.AttestationReceipt>(JSON.parse(String(record.originalCore ?? record.original)))!;
