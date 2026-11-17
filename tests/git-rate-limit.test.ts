@@ -50,6 +50,13 @@ it.each(["date", "absent"])("respects %s rate-limit timing without a tight retry
     .mockResolvedValue(new Response("{}"));
   const transport = new GitHubTransport({ owner: "owner", repo: "repo", request });
   const result = transport.call("/git/blobs/content-address");
+  if (kind === "absent") {
+    // Default cooldown exceeds the 30s total deadline: fail closed now rather
+    // than retry early or spend a minute outside the advertised budget.
+    await expect(result).rejects.toMatchObject({ code: "GIT_RATE_LIMITED" });
+    expect(request).toHaveBeenCalledTimes(1);
+    return;
+  }
   await vi.advanceTimersByTimeAsync(delay - 1);
   expect(request).toHaveBeenCalledTimes(1);
   await vi.advanceTimersByTimeAsync(1);

@@ -46,10 +46,12 @@ export function signerMaterial() {
   };
 }
 
-export async function connectorRequest(path: string, init: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal }) {
-  const { ReplitConnectors } = await diagnosticPhase("connector_import", () => import("@replit/connectors-sdk"));
-  const client = await diagnosticPhase("connector_setup", async () => new ReplitConnectors());
-  return diagnosticPhase("connector_proxy", () => client.proxy("github", path, init as any) as Promise<Response>);
+export async function connectorRequest(path: string, init: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal; diagnosticAttempt?: number }) {
+  const { ObservedGitConnector } = await diagnosticPhase("connector_import", () => import("./connectorDiagnostics"));
+  const { diagnosticAttempt, ...options } = init;
+  const attempt = Number.isInteger(diagnosticAttempt) && diagnosticAttempt! >= 1 && diagnosticAttempt! <= 3 ? diagnosticAttempt! : 1;
+  const client = await diagnosticPhase("connector_setup", async () => new ObservedGitConnector(attempt));
+  return diagnosticPhase("connector_proxy", () => client.proxy("github", path, options) as Promise<Response>);
 }
 
 export function createGitHubStore(env = process.env, request = connectorRequest) {
