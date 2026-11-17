@@ -352,7 +352,7 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   app.use("/api", restrictLifeosServiceWrites);
-  registerProjectServiceRoutes(app, publicApiLimiter);
+  registerProjectServiceRoutes(app);
 
   app.get("/api/lifeos/authorization", publicApiLimiter, async (req, res) => {
     res.setHeader("Cache-Control", "no-store");

@@ -1,4 +1,5 @@
 import type { Express } from "express";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import path from "node:path";
 import { z } from "zod";
@@ -47,12 +48,33 @@ export async function verifyRepositoryAdministration(token: string, project: str
       repository.permissions?.admin !== true || repository.archived || repository.disabled) denied();
 }
 
-export function registerProjectServiceRoutes(app: Express, limiter: any) {
-  app.get("/api/project-enrollments", requireAuth, async (_req,res) => {
+export function registerProjectServiceRoutes(app: Express) {
+  // Separate from LifeOS's limiter: a project flood must not consume its budget.
+  // IP protection runs before authentication/provider/custody work. Identity
+  // budgets are shared across this API's operations, not reset by changing URLs.
+  const ipLimit = rateLimit({
+    windowMs: 15 * 60 * 1000, limit: 100, standardHeaders: true, legacyHeaders: false,
+    handler: (_req,res) => { res.setHeader("Cache-Control","no-store"); res.status(429).json({message:"Too many requests, please try again later."}); },
+  });
+  const ownerLimit = rateLimit({
+    windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false,
+    keyGenerator: req => req.dbUser?.id ? `owner:${hash(req.dbUser.id)}` : `ip:${ipKeyGenerator(req.ip ?? "")}`,
+    handler: (_req,res) => { res.setHeader("Cache-Control","no-store"); res.status(429).json({message:"Too many requests, please try again later."}); },
+  });
+  const serviceLimit = rateLimit({
+    windowMs: 15 * 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false,
+    // One credential per service identity. Never key by caller-controlled project
+    // labels or retain bearer material in the limiter. Proof is still mandatory.
+    keyGenerator: req => /^Bearer fp_project_[0-9a-f-]{36}\.[0-9a-f]{64}$/.test(req.headers.authorization ?? "")
+      ? `credential:${hash(req.headers.authorization!)}`
+      : `ip:${ipKeyGenerator(req.ip ?? "")}`,
+    handler: (_req,res) => { res.setHeader("Cache-Control","no-store"); res.status(429).json({message:"Too many requests, please try again later."}); },
+  });
+  app.get("/api/project-enrollments", ipLimit, requireAuth, ownerLimit, async (_req,res) => {
     res.setHeader("Cache-Control","no-store");
     try { res.json({projects:await git().listProjectServices()}); } catch(e) { fail(res,e); }
   });
-  app.post("/api/project-enrollments", limiter, requireAuth, async (req,res) => {
+  app.post("/api/project-enrollments", ipLimit, requireAuth, ownerLimit, async (req,res) => {
     res.setHeader("Cache-Control","no-store");
     try {
       const parsed=enrollment.safeParse(req.body);
@@ -73,7 +95,7 @@ export function registerProjectServiceRoutes(app: Express, limiter: any) {
       res.status(201).json({...binding,credential});
     } catch(e) { fail(res,e); }
   });
-  app.delete("/api/project-enrollments/:id", requireAuth, async (req,res) => {
+  app.delete("/api/project-enrollments/:id", ipLimit, requireAuth, ownerLimit, async (req,res) => {
     try { await git().revokeProjectService(String(req.params.id)); res.json({revoked:true}); }
     catch(e) { fail(res,e); }
   });
@@ -85,12 +107,12 @@ export function registerProjectServiceRoutes(app: Express, limiter: any) {
     const binding=await git().authenticateProjectService(match[2],verifier);
     return withStoragePrincipal(String(binding.serviceIdentity),()=>action(git(),binding,verifier));
   }
-  app.get("/api/project-services/:id/authorization", limiter, async (req,res) => {
+  app.get("/api/project-services/:id/authorization", ipLimit, serviceLimit, async (req,res) => {
     res.setHeader("Cache-Control","no-store");
     try { res.json(await authenticated(req,async (_store,binding)=>({authorized:true,...binding}))); }
     catch(e) { fail(res,e); }
   });
-  app.post("/api/project-services/:id/attest", limiter, async (req,res) => {
+  app.post("/api/project-services/:id/attest", ipLimit, serviceLimit, async (req,res) => {
     res.setHeader("Cache-Control","no-store");
     try {
       const receipt=await authenticated(req,async (store,binding,verifier)=>{
@@ -115,7 +137,7 @@ export function registerProjectServiceRoutes(app: Express, limiter: any) {
       res.status(201).json(receipt);
     } catch(e) { fail(res,e); }
   });
-  app.get("/api/project-services/:id/attest/status/:requestId", limiter, async (req,res) => {
+  app.get("/api/project-services/:id/attest/status/:requestId", ipLimit, serviceLimit, async (req,res) => {
     res.setHeader("Cache-Control","no-store");
     try {
       const receipt=await authenticated(req,async (store,binding,verifier)=>{

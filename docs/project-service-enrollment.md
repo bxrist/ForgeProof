@@ -43,6 +43,16 @@ enrollment; it never shares the LifeOS key.
 
 ## Service APIs
 
+All project-service routes have a shared IP limit of 100 requests per 15 minutes,
+before authentication/provider/custody work. Owner enrollment/list/revocation
+operations additionally share 30 requests per authenticated owner per 15 minutes.
+Service authorization/issuance/recovery share 60 requests per credential per
+15 minutes, keyed by a one-way fingerprint, not bearer material or URL labels.
+Throttling returns generic HTTP 429 with retry headers and `Cache-Control:
+no-store`. These process-local limits follow the existing middleware convention;
+they do not claim a distributed cross-instance quota. Their counters are separate
+from LifeOS's existing limiter.
+
 Send the issued bearer credential to these routes, using its enrollment ID:
 
 - `GET /api/project-services/:id/authorization`: validates signed Git binding,
