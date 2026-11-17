@@ -1,4 +1,5 @@
 import { GitAppStateService, type Checkpoint, type Signer, type Trust } from './store.mjs';
+export declare class GitReadUnavailableError extends Error { readonly code: 'GIT_READ_UNAVAILABLE'; }
 export type GitHubRequest = (path: string, init: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<Response>;
 export declare class GitHubTransport {
   constructor(options: { owner: string; repo: string; request: GitHubRequest });

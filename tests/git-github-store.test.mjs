@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
-import { GitHubAppStateService, GitHubCredentialVault, GitHubTransport } from '../server/git-store/github-store.mjs';
+import { GitHubAppStateService, GitHubCredentialVault, GitHubTransport, GitReadUnavailableError } from '../server/git-store/github-store.mjs';
 
 // Minimal in-memory emulation of the GitHub Git Data API (non-forced ref CAS).
 function fakeGitHub() {
@@ -133,6 +133,37 @@ test('prefetch failures and corrupted content fail closed without advancing chec
   await assert.rejects(untrusted.replay(),/Untrusted event signature/);
   const wrongPin=new GitHubAppStateService({...options,checkpoint:{...pinned,eventHash:'0'.repeat(64)}});
   await assert.rejects(wrongPin.replay(),/Checkpoint mismatch/);
+});
+
+test('classified cold-read failure preserves pin, drains reads and permits verified replay without writes', async () => {
+  const {gh,options,transport} = await coldFixture();
+  const reader = new GitHubAppStateService(options);
+  const pin = structuredClone(options.checkpoint);
+  // Fail a mutable ref read: no transport retry and no integrity downgrade.
+  let fail = true;
+  transport.request = async (path, init) => fail && path.includes('/git/ref/')
+    ? new Response('{}', {status:503}) : gh.request(path,init);
+  await assert.rejects(reader.replay(), GitReadUnavailableError);
+  assert.deepEqual(reader.checkpoint,pin);
+  fail = false;
+  const state = await reader.replay();
+  assert.equal(state.events.length,9);
+  assert.equal(state.checkpoint.sequence,9);
+  assert.ok(gh.calls.every(c=>c.method==='GET'));
+  const cold = new GitHubAppStateService({...options, checkpoint:state.checkpoint});
+  gh.calls.length = 0;
+  assert.equal((await cold.replay()).events.length,9);
+  assert.equal(gh.calls.length,28,'checkpoint alone never skips signed-prefix verification');
+  gh.refs.set('refs/heads/forgeproof/t/other',state.checkpoint.commit);
+  const wrongProject = new GitHubAppStateService({...options, repository:'other'});
+  await assert.rejects(wrongProject.replay(),/scope mismatch/);
+  const wrongActor = new GitHubAppStateService({...options,trust:{...options.trust,
+    eventKeys:{k:{...options.trust.eventKeys.k,actor:'other'}}}});
+  await assert.rejects(wrongActor.replay(),/Untrusted event signature/);
+  const absentPin = new GitHubAppStateService({...options,checkpoint:{...pin,commit:'f'.repeat(40)}});
+  await assert.rejects(absentPin.replay(),/Trusted checkpoint absent/);
+  gh.refs.set('refs/heads/forgeproof/t/s',pin.commit);
+  await assert.rejects(cold.replay(),/rewritten|behind|divergent/);
 });
 
 test('GitHub-backed store appends, replays, rejects rewinds and serves custody CAS', async () => {

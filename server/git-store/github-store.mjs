@@ -10,6 +10,14 @@ import { GitAppStateService, IntegrityError, ConflictError } from './store.mjs';
 const enc = encodeURIComponent;
 import { bootId } from '../bootIdentity.mjs';
 
+// Only constructed for explicit upstream read failures, never auth or integrity.
+export class GitReadUnavailableError extends Error {
+  constructor() { super('Git upstream read unavailable'); this.code = 'GIT_READ_UNAVAILABLE'; }
+}
+function requireAvailableRead(status) {
+  if ([502, 503, 504].includes(status)) throw new GitReadUnavailableError();
+}
+
 function retryableConnectorError(error) {
   // Unknown connector errors may retry only within the immutable-read budget.
   // Inspect denial indicators locally; never emit error text or identifiers.
@@ -38,6 +46,7 @@ export class GitHubTransport {
       ? `${method}:${resource}` : 'other';
     let status = null;
     let retries = 0;
+    const readOnly = method === 'GET';
     const immutable = method === 'GET' && /^\/git\/(commits|trees|blobs)\//.test(path);
     const deadline = Date.now() + 30000;
     const exhausted = () => Object.assign(new Error('Git read deadline'), { code: 'GIT_READ_DEADLINE' });
@@ -48,15 +57,15 @@ export class GitHubTransport {
       activeController = controller;
       let timer;
       try {
-        if (immutable && Date.now() >= deadline) throw exhausted();
+        if (readOnly && Date.now() >= deadline) throw exhausted();
         const pending = this.request(this.base + path, {
       method,
       diagnosticAttempt: retries + 1,
-      ...(immutable ? { signal: controller.signal } : {}),
+      ...(readOnly ? { signal: controller.signal } : {}),
       headers: { accept: 'application/vnd.github+json', ...(body ? { 'content-type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
-        if (!immutable) return await pending;
+        if (!readOnly) return await pending;
         return await Promise.race([pending, new Promise((_, reject) => {
           timer = setTimeout(() => {
             reject(Object.assign(new Error('Git read deadline'), { code: 'GIT_READ_DEADLINE' }));
@@ -109,7 +118,7 @@ export class GitHubTransport {
     let bodyTimer;
     let text;
     try {
-      text = immutable ? await Promise.race([response.text(), new Promise((_, reject) => {
+      text = readOnly ? await Promise.race([response.text(), new Promise((_, reject) => {
         bodyTimer = setTimeout(() => {
           reject(exhausted());
           activeController.abort();
@@ -129,21 +138,25 @@ export class GitHubTransport {
   }
   async ref(ref) {
     const { status, json } = await this.call(`/git/ref/${ref.replace(/^refs\//, '').split('/').map(enc).join('/')}`);
+    requireAvailableRead(status);
     if (status === 404) return null;
     if (status !== 200 || json?.ref !== ref || json?.object?.type !== 'commit' || !/^[a-f0-9]{40}$/.test(json.object.sha)) throw new IntegrityError('Unreadable or symbolic Git ref');
     return json.object.sha;
   }
   async commit(sha) {
     const { status, json } = await this.call(`/git/commits/${sha}`);
+    requireAvailableRead(status);
     if (status !== 200 || json?.sha !== sha) throw new IntegrityError('Missing Git commit');
     return { tree: json.tree.sha, parents: json.parents.map(p => p.sha) };
   }
   async singleFile(treeSha, name) {
     const { status, json } = await this.call(`/git/trees/${treeSha}`);
+    requireAvailableRead(status);
     if (status !== 200 || json?.truncated || !Array.isArray(json?.tree) || json.tree.length !== 1) throw new IntegrityError('Unexpected tree content');
     const [entry] = json.tree;
     if (entry.path !== name || entry.mode !== '100644' || entry.type !== 'blob') throw new IntegrityError('Unexpected tree content');
     const blob = await this.call(`/git/blobs/${entry.sha}`);
+    requireAvailableRead(blob.status);
     if (blob.status !== 200 || blob.json?.encoding !== 'base64') throw new IntegrityError('Missing Git blob');
     const bytes = Buffer.from(blob.json.content, 'base64');
     // Content addressing: the blob ID must equal Git's own hash of the bytes.

@@ -3,18 +3,18 @@ import { GitHubTransport } from "../server/git-store/github-store.mjs";
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
-it("allows a mutable ref read to complete beyond the immutable read deadline without retry", async () => {
+it("bounds a mutable ref read at the read deadline without retry", async () => {
   vi.useFakeTimers();
   vi.spyOn(console, "info").mockImplementation(() => {});
   const request = vi.fn((_path: string, _options: any) => new Promise(resolve => setTimeout(() => resolve(
     new Response(JSON.stringify({ ref: "refs/heads/private", object: { type: "commit", sha: "a".repeat(40) } }))
   ), 31000)));
   const transport = new GitHubTransport({ owner: "private-owner", repo: "private-repo", request });
-  const result = transport.ref("refs/heads/private");
+  const result = transport.ref("refs/heads/private").catch(error => error);
   await vi.advanceTimersByTimeAsync(31000);
-  expect(await result).toBe("a".repeat(40));
+  expect(await result).toMatchObject({ code: "GIT_READ_DEADLINE" });
   expect(request).toHaveBeenCalledTimes(1);
-  expect(request.mock.calls[0][1].signal).toBeUndefined();
+  expect(request.mock.calls[0][1].signal.aborted).toBe(true);
 });
 
 it.each([401, 403, 429, 503])("does not retry a ref response with status %s", async status => {

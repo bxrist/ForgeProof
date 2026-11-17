@@ -1,5 +1,3 @@
-import express from "express";
-import request from "supertest";
 import { afterEach, expect, it, vi } from "vitest";
 import { gitAvailabilityError } from "../server/middlewares/gitAvailabilityError";
 import { GitHubTransport } from "../server/git-store/github-store.mjs";
@@ -11,13 +9,17 @@ it("maps a real exhausted Git ref rate limit to sanitized noncached 503 without 
   vi.spyOn(console, "info").mockImplementation(() => {});
   const upstream = vi.fn().mockResolvedValue(new Response("private provider data", { status: 429 }));
   const transport = new GitHubTransport({ owner: "private-owner", repo: "private-repo", request: upstream });
-  const app = express();
-  app.get("/manifest", async () => { await transport.call("/git/ref/heads/main"); });
-  app.use(gitAvailabilityError);
-  const response = await request(app).get("/manifest");
-  expect(response.status).toBe(503);
-  expect(response.headers["cache-control"]).toBe("no-store");
-  expect(response.body).toEqual({
+  // Exercise the actual transport exception and middleware without opening a
+  // listening socket (the isolated source sandbox forbids socket creation).
+  const error = await transport.call("/git/ref/heads/main").catch(error => error);
+  const res = { headersSent: false, setHeader: vi.fn(), status: vi.fn(), json: vi.fn() };
+  res.status.mockReturnValue(res);
+  const next = vi.fn();
+  gitAvailabilityError(error, {} as any, res as any, next);
+  expect(next).not.toHaveBeenCalled();
+  expect(res.status).toHaveBeenCalledWith(503);
+  expect(res.setHeader).toHaveBeenCalledWith("Cache-Control", "no-store");
+  expect(res.json).toHaveBeenCalledWith({
     message: "Authoritative storage temporarily unavailable", code: "GIT_RATE_LIMITED",
   });
   expect(upstream).toHaveBeenCalledTimes(1);
