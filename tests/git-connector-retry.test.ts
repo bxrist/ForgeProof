@@ -52,6 +52,6 @@ it("aborts a hung immutable read and never overlaps a retry after deadline", asy
   vi.useFakeTimers();
   const request = vi.fn(() => new Promise(() => {}));
   const assertion = expect(make(request).call("/git/trees/hash")).rejects.toMatchObject({ code: "GIT_READ_DEADLINE" });
-  await vi.advanceTimersByTimeAsync(15000); await assertion;
+  await vi.advanceTimersByTimeAsync(30000); await assertion;
   expect(request).toHaveBeenCalledTimes(1);
 });

@@ -9,8 +9,8 @@ storage authority, or replay verification order.
 - Only commit/tree/blob GETs are retried: at most three transport attempts.
 - Each attempt calls the normal production connector adapter again, creating
   normal SDK identity headers and using the same authorized GitHub connection.
-- Existing 15-second per-request deadlines remain; the 30-second total budget
-  now also includes backoff and response-body consumption. No shorter mutable
+- Immutable requests use the remaining 30-second total budget, which also
+  includes backoff and response-body consumption. No shorter mutable
   ref deadline is reintroduced.
 - Mutable reads and writes are never transport-retried.
 - SDK-internal HTTP 401 replay is disabled for this Git adapter so writes and

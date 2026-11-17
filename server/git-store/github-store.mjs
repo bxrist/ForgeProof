@@ -61,7 +61,7 @@ export class GitHubTransport {
           timer = setTimeout(() => {
             reject(Object.assign(new Error('Git read deadline'), { code: 'GIT_READ_DEADLINE' }));
             controller.abort();
-          }, Math.max(0, Math.min(15000, deadline - Date.now())));
+          }, Math.max(0, deadline - Date.now()));
         })]);
       } finally { clearTimeout(timer); }
     };

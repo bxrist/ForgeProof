@@ -88,6 +88,40 @@ it("uses one wall-clock deadline across attempts and backoff", async () => {
   expect(fetch).toHaveBeenCalledTimes(3);
 });
 
+it("accepts a 17-second immutable SDK read on its first attempt", async () => {
+  vi.useFakeTimers();
+  const fetch = vi.fn(() => new Promise<Response>(resolve =>
+    setTimeout(() => resolve(new Response("{}")), 17000)));
+  vi.stubGlobal("fetch", fetch);
+  const result = transport().call("/git/trees/object");
+  // Attach immediately: a regression to the 15s cutoff must fail this assertion.
+  const assertion = expect(result).resolves.toEqual({ status: 200, json: {} });
+  await vi.advanceTimersByTimeAsync(16000);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls[0][1].signal.aborted).toBe(false);
+  await vi.advanceTimersByTimeAsync(1000);
+  await assertion;
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(headers).toHaveBeenCalledTimes(1);
+});
+
+it("aborts a slower-than-30-second SDK read without retry or late acceptance", async () => {
+  vi.useFakeTimers();
+  const fetch = vi.fn(() => new Promise<Response>(resolve =>
+    setTimeout(() => resolve(new Response("{}")), 31000)));
+  vi.stubGlobal("fetch", fetch);
+  const result = transport().call("/git/blobs/object");
+  const assertion = expect(result).rejects.toMatchObject({ code: "GIT_READ_DEADLINE" });
+  await vi.advanceTimersByTimeAsync(29999);
+  expect(fetch.mock.calls[0][1].signal.aborted).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);
+  await assertion;
+  expect(fetch.mock.calls[0][1].signal.aborted).toBe(true);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(headers).toHaveBeenCalledTimes(1);
+});
+
 it("does not wait past the total deadline for Retry-After", async () => {
   const fetch = vi.fn().mockResolvedValue(new Response("", { status: 429, headers: { "Retry-After": "60" } }));
   vi.stubGlobal("fetch", fetch);
