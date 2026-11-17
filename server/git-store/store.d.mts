@@ -1,5 +1,5 @@
 /// <reference types="node" />
-export type RecordClass = 'users' | 'repositories' | 'organizations' | 'orgMembers' | 'apiKeys' | 'subscriptions' | 'auditLogs' | 'sessions' | 'receipts' | 'pendingEmails' | 'receiptAnnotations' | 'serviceDashboardPrincipals' | 'serviceDashboardBindings' | 'serviceDashboardGrants' | 'githubApp';
+export type RecordClass = 'projectServices' | 'users' | 'repositories' | 'organizations' | 'orgMembers' | 'apiKeys' | 'subscriptions' | 'auditLogs' | 'sessions' | 'receipts' | 'pendingEmails' | 'receiptAnnotations' | 'serviceDashboardPrincipals' | 'serviceDashboardBindings' | 'serviceDashboardGrants' | 'githubApp';
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export interface AppRecord { id: string | number; [field: string]: Json }
 export interface Checkpoint { commit: string; eventHash: string; sequence: number }

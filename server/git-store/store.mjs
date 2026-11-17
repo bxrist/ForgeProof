@@ -138,7 +138,7 @@ export class GitAppStateService {
     for (const op of operations) {
       exact(op, ['kind','id','action','expectedVersion','record']);
       if (!classes.includes(op.kind)) throw new Error('Unknown class');
-      if (op.kind === 'users' || op.kind === 'sessions' || op.kind === 'serviceDashboardPrincipals' || op.kind === 'githubApp') identifier(op.id); else positive(op.id);
+      if (op.kind === 'users' || op.kind === 'sessions' || op.kind === 'serviceDashboardPrincipals' || op.kind === 'githubApp' || op.kind === 'projectServices') identifier(op.id); else positive(op.id);
       const address = `${op.kind}/${op.id}`;
       if (touched.has(address)) throw new Error('Repeated transaction record');
       touched.add(address);

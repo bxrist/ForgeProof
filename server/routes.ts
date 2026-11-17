@@ -8,6 +8,7 @@ import { currentApplicationStorage, setVerifiedStoragePrincipal } from "./storag
 import type { GitStorage } from "./git-store/storage";
 import { randomUUID } from "node:crypto";
 import { registerLifeosAttestationRoutes } from "./lifeosAttestationRoutes.mjs";
+import { registerProjectServiceRoutes } from "./projectServices";
 import { registerDashboardAccessRoutes } from "./dashboardAccess";
 import { registerGitHubAppRoutes } from "./githubApp/routes";
 import { pool } from "./legacySqlPool";
@@ -351,6 +352,7 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   app.use("/api", restrictLifeosServiceWrites);
+  registerProjectServiceRoutes(app);
 
   app.get("/api/lifeos/authorization", publicApiLimiter, async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
