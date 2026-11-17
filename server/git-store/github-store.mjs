@@ -14,9 +14,9 @@ function retryableConnectorError(error) {
   // Unknown connector errors may retry only within the immutable-read budget.
   // Inspect denial indicators locally; never emit error text or identifiers.
   for (let e = error, depth = 0; e && depth < 3; e = e.cause, depth++) {
-    if (e instanceof IntegrityError || e instanceof ConflictError ||
+    if (e instanceof IntegrityError || e instanceof ConflictError || e instanceof SyntaxError ||
         [401, 403].includes(e.status ?? e.statusCode ?? e.response?.status) ||
-        /auth|credential|token|identity|permission|forbidden|denied|EACCES|EPERM|config|signer|signature|integrity|checkpoint|tenant|owner|rate.?limit|429|401|403/i.test(
+        /auth|credential|token|identity|permission|scope|forbidden|denied|EACCES|EPERM|config|signer|signature|integrity|checkpoint|tenant|owner|invalid.?body|rate.?limit|429|401|403/i.test(
           `${e.code ?? ''} ${e.name ?? ''} ${e.message ?? ''}`) ||
         e.code === 'GIT_READ_DEADLINE') return false;
   }
@@ -39,15 +39,19 @@ export class GitHubTransport {
     let status = null;
     let retries = 0;
     const immutable = method === 'GET' && /^\/git\/(commits|trees|blobs)\//.test(path);
-    let remainingReadMs = 30000;
+    const deadline = Date.now() + 30000;
+    const exhausted = () => Object.assign(new Error('Git read deadline'), { code: 'GIT_READ_DEADLINE' });
+    let activeController;
     try {
     const request = async () => {
       const controller = new AbortController();
+      activeController = controller;
       let timer;
-      const requestStarted = Date.now();
       try {
+        if (immutable && Date.now() >= deadline) throw exhausted();
         const pending = this.request(this.base + path, {
       method,
+      diagnosticAttempt: retries + 1,
       ...(immutable ? { signal: controller.signal } : {}),
       headers: { accept: 'application/vnd.github+json', ...(body ? { 'content-type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
@@ -57,9 +61,9 @@ export class GitHubTransport {
           timer = setTimeout(() => {
             reject(Object.assign(new Error('Git read deadline'), { code: 'GIT_READ_DEADLINE' }));
             controller.abort();
-          }, Math.max(0, Math.min(15000, remainingReadMs)));
+          }, Math.max(0, Math.min(15000, deadline - Date.now())));
         })]);
-      } finally { clearTimeout(timer); remainingReadMs -= Date.now() - requestStarted; }
+      } finally { clearTimeout(timer); }
     };
     let response;
     // Only immutable reads: never replay a write or retry an integrity failure.
@@ -68,6 +72,7 @@ export class GitHubTransport {
       catch (error) {
         status = null;
         if (!immutable || retries >= 2 || !retryableConnectorError(error)) throw error;
+        if (Date.now() + 500 * (retries + 1) >= deadline) throw exhausted();
         retries++;
         await new Promise(resolve => setTimeout(resolve, 500 * retries));
         continue;
@@ -84,17 +89,34 @@ export class GitHubTransport {
         // Never retry earlier than requested; long cooldowns remain unavailable.
         if (!Number.isFinite(delay) || delay > 60000) break;
       }
-      await response.text();
+      // Backoff is part of the same wall-clock budget. Never retry earlier
+      // than Retry-After, nor multiply the budget across failure types.
+      if (Date.now() + delay >= deadline) {
+        if (status === 429) break;
+        response.body?.cancel().catch(() => {});
+        throw exhausted();
+      }
+      response.body?.cancel().catch(() => {});
       await new Promise(resolve => setTimeout(resolve, delay));
       retries++;
     }
     status = response.status;
     if (status === 429) {
-      await response.text();
+      response.body?.cancel().catch(() => {});
       throw Object.assign(new Error('Git transport rate limited'), { code: 'GIT_RATE_LIMITED' });
     }
-    const text = await response.text();
-    let json; try { json = text ? JSON.parse(text) : undefined; } catch { json = undefined; }
+    // Bound body consumption too. Invalid/truncated bodies are never retried.
+    let bodyTimer;
+    let text;
+    try {
+      text = immutable ? await Promise.race([response.text(), new Promise((_, reject) => {
+        bodyTimer = setTimeout(() => {
+          reject(exhausted());
+          activeController.abort();
+        }, Math.max(0, deadline - Date.now()));
+      })]) : await response.text();
+    } finally { clearTimeout(bodyTimer); }
+    const json = text ? JSON.parse(text) : undefined;
     return { status: response.status, json };
     } finally {
       const durationMs = Math.round(performance.now() - started);
