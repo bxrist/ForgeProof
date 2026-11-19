@@ -137,3 +137,20 @@ it("never writes identity values into sanitized diagnostics", async () => {
   expect(JSON.stringify(log.mock.calls)).not.toContain("X-Replit-Token");
   expect(JSON.stringify(log.mock.calls)).not.toContain("deployment-fixture");
 });
+it("never joins a pre-denial in-flight acquisition after cache invalidation", async () => {
+  const resolvers: Array<(token: string) => void> = [];
+  const cli = vi.fn(() => new Promise<string>(resolve => resolvers.push(resolve)));
+  const broker = new DeploymentIdentityBroker({ cli, local: vi.fn() }, Date.now, vi.fn());
+  const beforeDenial = broker.headers(env);
+  expect(cli).toHaveBeenCalledTimes(1);
+  broker.invalidate();
+  const afterDenial = broker.headers(env);
+  expect(cli).toHaveBeenCalledTimes(2);
+  const fresh = futureJwt(Date.now() / 1000 + 300);
+  resolvers[1](fresh);
+  expect((await afterDenial)["X-Replit-Token"]).toBe("depl " + fresh);
+  resolvers[0]("stale-before-denial");
+  expect((await beforeDenial)["X-Replit-Token"]).toBe("depl stale-before-denial");
+  expect((await broker.headers(env))["X-Replit-Token"]).toBe("depl " + fresh);
+  expect(cli).toHaveBeenCalledTimes(2);
+});

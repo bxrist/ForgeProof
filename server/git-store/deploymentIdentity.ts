@@ -87,7 +87,7 @@ export class DeploymentIdentityBroker {
   private revision = 0;
   constructor(private readonly methods: IdentityMethods = { cli: cliMint, local: localMint },
     private readonly now: () => number = Date.now, private readonly report: IdentityTrace = defaultReport) {}
-  invalidate(): void { this.revision++; this.cached = undefined; }
+  invalidate(): void { this.revision++; this.cached = undefined; this.running = undefined; }
   async headers(env: NodeJS.ProcessEnv = process.env): Promise<Record<string, string>> {
     const scope = scopeOf(env), now = this.now();
     if (this.cached?.scope === scope && this.cached.until > now) {
