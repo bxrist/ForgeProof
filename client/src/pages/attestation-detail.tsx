@@ -40,6 +40,7 @@ import { SEO } from "@/components/SEO";
 import { SourceManifestPanel } from "@/components/SourceManifestPanel";
 import { RuntimeVerificationChecklist } from "@/components/RuntimeVerificationChecklist";
 import { ReceiptClaims } from "@/components/ReceiptClaims";
+import { ProviderResidencyGuarantee } from "@/components/ProviderResidencyGuarantee";
 import { useAppPrincipal } from "@/hooks/use-provenance";
 import { receiptPresentation } from "@shared/receiptPresentation";
 import { redactMetadata } from "@/lib/provenance";
@@ -417,6 +418,7 @@ export default function AttestationDetailPage() {
             </div>
           </div>
           <div className="mt-4 pt-4 border-t border-border"><ReceiptClaims receipt={receipt} /></div>
+          <ProviderResidencyGuarantee receiptId={receipt.id} />
         </Card>
 
         <p className="text-xs text-muted-foreground">A certificate proves the integrity of signed content when its hash and signature verify. It does not prove AI authorship, execution location, compliance, or a per-file security audit. UNKNOWN is not a pass.</p>
