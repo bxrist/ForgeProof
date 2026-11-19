@@ -5,6 +5,7 @@ import { GitAppStateService } from "./store.mjs";
 import { RemoteGitAppStateService } from "./remote.mjs";
 import { GitStorage } from "./storage";
 import { installApplicationStorage } from "../storageBackend";
+import { initializationRecoveryEnabled, replayDuringInitialization } from "./initializationRecovery";
 
 /**
  * Bootstrap the existing commercial application, not the isolated test server.
@@ -23,11 +24,12 @@ export async function initializeApplicationStorage(): Promise<void> {
   }
   if (mode !== "git") throw new Error("Unknown application storage backend");
   if (process.env.FORGEPROOF_GIT_GITHUB_REPOSITORY) {
+    const recovery = initializationRecoveryEnabled();
     // Private GitHub repository through the authorized GitHub connection.
     const { createGitHubStore } = await import("./githubRuntime");
     const resources = createGitHubStore();
     const { settings, service, custody, material } = resources;
-    const state = await service.replay();
+    const state = await replayDuringInitialization(service, recovery);
     if (!state.records.users[settings.guardUserId]) throw new Error("Existing owner account is absent from the Git store");
     if (process.env.LIFEOS_OWNER_APPROVAL_AUDIT_ID) {
       const { loadLifeosGitBinding } = await import("../lifeosBinding");

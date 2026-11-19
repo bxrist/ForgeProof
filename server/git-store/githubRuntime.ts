@@ -2,6 +2,7 @@ import { createPrivateKey, createPublicKey, hkdfSync, sign } from "node:crypto";
 import { normalizedSignerPem, configuredSignerSecrets } from "../crypto";
 import { GitHubAppStateService, GitHubCredentialVault, GitHubTransport } from "./github-store.mjs";
 import { EncryptedProviderCustodian } from "./custody";
+import { createGitHubAppRequest } from "./githubAppRequest";
 import { diagnosticPhase } from "../startupDiagnostics";
 
 /**
@@ -15,6 +16,11 @@ export const GIT_EVENT_KEY_ID = "forgeproof-production-38dd16a7";
 const stripPem = (value: string) => value.replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s/g, "");
 
 export function githubStoreSettings(env = process.env) {
+  // Reserved source-only scaffold. No authenticated snapshot protocol exists yet.
+  // Reject requested acceleration rather than silently downgrade to full replay.
+  if (env.FORGEPROOF_GIT_SNAPSHOT_REF !== undefined ||
+      env.FORGEPROOF_GIT_SNAPSHOT_MODE !== undefined && env.FORGEPROOF_GIT_SNAPSHOT_MODE !== "disabled")
+    throw new Error("Git state snapshots are disabled pending rollback-safe protocol");
   const repository = env.FORGEPROOF_GIT_GITHUB_REPOSITORY;
   if (!repository || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw new Error("FORGEPROOF_GIT_GITHUB_REPOSITORY must be owner/repo");
   const [owner, repo] = repository.split("/");
@@ -54,7 +60,13 @@ export async function connectorRequest(path: string, init: { method?: string; he
   return diagnosticPhase("connector_proxy", () => client.proxy("github", path, options) as Promise<Response>);
 }
 
-export function createGitHubStore(env = process.env, request = connectorRequest) {
+export function productionGitRequest(env = process.env) {
+  if (!env.FORGEPROOF_GIT_TRANSPORT || env.FORGEPROOF_GIT_TRANSPORT === "replit") return connectorRequest;
+  if (env.FORGEPROOF_GIT_TRANSPORT === "github-app") return createGitHubAppRequest(env);
+  throw new Error("Invalid Git transport configuration");
+}
+
+export function createGitHubStore(env = process.env, request = productionGitRequest(env)) {
   const settings = githubStoreSettings(env);
   const material = signerMaterial();
   const transport = new GitHubTransport({ owner: settings.owner, repo: settings.repo, request });
