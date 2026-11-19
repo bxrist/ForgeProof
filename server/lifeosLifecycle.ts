@@ -5,6 +5,36 @@ import { verifySignature } from "./crypto";
 export const projectIdSchema = z.string().max(200).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/);
 const label = z.string().min(1).max(256);
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
+
+// A provider policy plus a captured regional configuration is a signed service
+// assertion about residency eligibility, NOT proof of a particular GPU location.
+const providerPolicyHosts = {
+  "openai-api": "developers.openai.com",
+  "aws-bedrock": "docs.aws.amazon.com",
+  "google-vertex-ai": "docs.cloud.google.com",
+} as const;
+
+export const providerResidencyGuaranteeSchema = z.object({
+  servingPlatform: z.enum(["openai-api", "aws-bedrock", "google-vertex-ai"]),
+  geographyType: z.enum(["country", "regional-area"]),
+  geography: z.string().regex(/^[A-Z]{2,12}$/),
+  routingProfile: z.string().min(2).max(160).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]+$/),
+  providerPolicyUrl: z.string().url().max(2048),
+  configurationSha256: hash,
+  invocationSha256: hash,
+  invokedAt: z.string().datetime(),
+}).strict().superRefine((evidence, context) => {
+  const uri = new URL(evidence.providerPolicyUrl);
+  if (uri.protocol !== "https:" || uri.username || uri.password ||
+      uri.hostname !== providerPolicyHosts[evidence.servingPlatform]) {
+    context.addIssue({ code: "custom", message: "Official provider residency policy URL required", path: ["providerPolicyUrl"] });
+  }
+  if (evidence.routingProfile.toLowerCase().includes("global")) {
+    context.addIssue({ code: "custom", message: "Global routing is not a geographic guarantee", path: ["routingProfile"] });
+  }
+});
+export type ProviderResidencyGuarantee = z.infer<typeof providerResidencyGuaranteeSchema>;
+
 export const lifecycleSchema = z.object({
   project: projectIdSchema,
   stage: z.enum(["source-write", "commit", "build", "deployment", "rollback"]),
@@ -14,6 +44,7 @@ export const lifecycleSchema = z.object({
   actor: z.object({ id: label, kind: z.enum(["human", "service", "agent"]) }).strict().optional(),
   tool: z.object({ name: label, version: label.optional() }).strict().optional(),
   model: z.object({ name: label, provider: label }).strict().optional(),
+  providerResidencyGuarantee: providerResidencyGuaranteeSchema.optional(),
   evidenceUri: z.string().url().max(2048).optional(),
 }).strict();
 export type LifecycleInput = z.infer<typeof lifecycleSchema>;
@@ -31,6 +62,7 @@ const payloadSchema = z.object({
   actor: lifecycleSchema.shape.actor,
   tool: lifecycleSchema.shape.tool,
   model: lifecycleSchema.shape.model,
+  providerResidencyGuarantee: lifecycleSchema.shape.providerResidencyGuarantee,
   evidenceUri: lifecycleSchema.shape.evidenceUri,
 }).strict();
 const envelopeSchema = z.object({
@@ -71,6 +103,9 @@ export function checkLifecycleLinks(
   parents: { receipt: LifecycleReceipt; evidence: LifecycleEvidence }[],
 ): void {
   if (!hash.safeParse(artifactHash).success) invalid("Lifecycle file_hash must be a bare lowercase SHA-256 digest");
+  if (input.providerResidencyGuarantee && (input.stage !== "source-write" || !input.model)) {
+    invalid("Provider residency guarantee requires a source-write model invocation");
+  }
   if (new Set(input.parents).size !== input.parents.length || parents.length !== input.parents.length)
     invalid("Duplicate or missing lifecycle parent");
   for (const p of parents) {
