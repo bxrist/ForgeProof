@@ -29,6 +29,40 @@ describe("receipt claim boundaries", () => {
     expect(r.observedModel).toBe("actual-model"); expect(r.observationStatus).toBe("reported");
     expect(r.producer).toBe("LifeOS"); expect(r.ciTool).toBe("GitHub Actions"); expect(r.processingRegion).toBe("UNKNOWN");
   });
+  it("shows signed service-observed model, provider, actor and tool from independently verified lifecycle evidence", () => {
+    const receipt = { modelName: "gpt-6.2-sol", modelProvider: "OpenAI", countryOfOrigin: "UNSPECIFIED" };
+    const lifecycle = {
+      verified: true, parentsVerified: true, modelAttribution: "service-observed",
+      payload: {
+        model: { name: "gpt-6.2-sol", provider: "OpenAI" },
+        actor: { id: "DevBot", kind: "agent" },
+        tool: { name: "Codex", version: "1.0" },
+      },
+    };
+    const claims = receiptPresentation(receipt, lifecycle);
+    expect(claims.observedModel).toBe("gpt-6.2-sol");
+    expect(claims.observedProvider).toBe("OpenAI");
+    expect(claims.actor).toBe("DevBot");
+    expect(claims.producer).toBe("DevBot");
+    expect(claims.ciTool).toBe("Codex v1.0");
+    expect(claims.observationStatus).toBe("signed-service-claim");
+    expect(claims.processingRegion).toBe("UNKNOWN");
+  });
+  it("never trusts unverified or conflicting lifecycle attribution", () => {
+    const receipt = { modelName: "known-model", modelProvider: "OpenAI", metadata: {
+      lifecycleEvidence: { payload: { model: { name: "forged-model", provider: "Other" } } },
+    } };
+    const candidate = {
+      verified: true, parentsVerified: true, modelAttribution: "service-observed",
+      payload: { model: { name: "different-model", provider: "OpenAI" } },
+    };
+    expect(receiptPresentation(receipt).observedModel).toBe("UNKNOWN");
+    expect(receiptPresentation(receipt, { ...candidate, verified: false }).observedModel).toBe("UNKNOWN");
+    expect(receiptPresentation(receipt, { ...candidate, parentsVerified: false }).observedModel).toBe("UNKNOWN");
+    expect(receiptPresentation(receipt, candidate).observedModel).toBe("UNKNOWN");
+    expect(receiptPresentation(receipt, { ...candidate, payload: { model: { name: "known-model", provider: "OpenAI" } } }).observedModel)
+      .toBe("known-model");
+  });
   it("redacts secrets recursively without modifying authorized originals", () => {
     const input = { label: "audit evidence", nested: { api_key: "secret" } };
     expect(redactEvidence(input)).toEqual({ label: "audit evidence", nested: { api_key: "[redacted]" } });

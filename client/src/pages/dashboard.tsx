@@ -183,6 +183,7 @@ function AttestationRow({
   modelCount?: number;
 }) {
   const [, navigate] = useLocation();
+  const [claimsOpen, setClaimsOpen] = useState(false);
   return (
     <div
       className="flex items-center gap-4 p-4 rounded-md hover-elevate cursor-pointer transition-colors"
@@ -227,9 +228,10 @@ function AttestationRow({
           )}
           {getAuditVerdictDisplay(receipt.auditVerdict)}
         </div>
-        <details className="mt-2" onClick={event => event.stopPropagation()}>
+        <details className="mt-2" onClick={event => event.stopPropagation()}
+          onToggle={event => setClaimsOpen(event.currentTarget.open)}>
           <summary className="text-xs text-muted-foreground cursor-pointer">Signed declarations and observations</summary>
-          <div className="mt-2"><ReceiptClaims receipt={receipt} /></div>
+          <div className="mt-2"><ReceiptClaims receipt={receipt} enabled={claimsOpen} /></div>
         </details>
       </div>
       <div className="hidden sm:flex items-center gap-2">
