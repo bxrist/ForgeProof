@@ -8,7 +8,7 @@ import { generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import { GitAppStateService } from '../server/git-store/store.mjs';
 import { GitStorage } from '../server/git-store/storage.ts';
 import { restoreProtectedReceipt } from '../server/git-store/protected-receipt.mjs';
-import { verifyLifecycleEnvelope, verifyLifecycleGraph } from '../server/lifeosLifecycle.ts';
+import { lifecycleSchema, canonicalLifecycle, verifyLifecycleEnvelope, verifyLifecycleGraph } from '../server/lifeosLifecycle.ts';
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'forgeproof-lifecycle-fixture-'));
@@ -114,4 +114,60 @@ test('ordinary origin receipts remain unchanged; forged metadata cannot become a
   await assert.rejects(f.git.getPublicLifecycleEvidence(fake.id));
   await assert.rejects(f.git.issueAttestationWithSigner(f.source, f.signer, 'original-request-3', undefined,
     { project: 'fixture/project', stage: 'source-write', parents: [], observedAt: '2026-11-10T00:00:00Z' }));
+});
+
+test('signed location observations verify through the graph without fabricating inference or country', async t => {
+  const f = await fixture(t);
+  const locationEvidence = {
+    schema: 'forgeproof.location-evidence.v1',
+    executionHost: { source: 'OCI_IMDS_V2', region: 'us-ashburn-1', availabilityDomain: 'AD-1' },
+    inference: { source: 'PROVIDER_RESPONSE', provider: 'anthropic', geography: 'us', responseSha256: 'd'.repeat(64) },
+  };
+  const a = await f.issue('source-write', [], { locationEvidence });
+  const c = await f.issue('commit', [a.id]);
+  const result = await f.git.getPublicLifecycleEvidence(a.id);
+  assert.deepEqual(result.payload.locationEvidence, locationEvidence);
+  assert.equal(result.verified && result.parentsVerified, true);
+  const rows = await f.records();
+  assert.equal(rows.get(a.id).countryOfOrigin, 'UNSPECIFIED');
+  assert.equal(verifyLifecycleGraph(c.id, id => rows.get(id)).evidence.payload.stage, 'commit');
+  const changed = structuredClone(rows.get(a.id));
+  changed.metadata.lifecycleEvidence.payload.locationEvidence.inference.geography = 'global';
+  assert.throws(() => verifyLifecycleEnvelope(changed));
+  rows.set(a.id, changed);
+  assert.throws(() => verifyLifecycleGraph(c.id, id => rows.get(id)));
+
+  const codex = await f.issue('source-write', [], {
+    model: { name: 'Codex', provider: 'OpenAI' },
+    locationEvidence: { schema: locationEvidence.schema, executionHost: locationEvidence.executionHost },
+  });
+  const codexPublic = await f.git.getPublicLifecycleEvidence(codex.id);
+  assert.equal(codexPublic.payload.locationEvidence.inference, undefined);
+  assert.equal(codex.countryOfOrigin, 'UNSPECIFIED');
+  const global = await f.issue('source-write', [], { locationEvidence: {
+    schema: locationEvidence.schema, inference: { ...locationEvidence.inference, geography: 'global' },
+  } });
+  assert.equal((await f.git.getPublicLifecycleEvidence(global.id)).payload.locationEvidence.inference.geography, 'global');
+});
+
+test('location evidence is strict and old lifecycle payloads stay byte-for-byte unchanged', async t => {
+  const base = { project: 'fixture/project', stage: 'source-write', parents: [], observedAt: '2026-11-10T00:00:00Z' };
+  assert.equal(canonicalLifecycle(lifecycleSchema.parse(base)), canonicalLifecycle(base));
+  const host = { source: 'OCI_IMDS_V2', region: 'us-ashburn-1' };
+  const inference = { source: 'PROVIDER_RESPONSE', provider: 'anthropic', geography: 'us', responseSha256: 'd'.repeat(64) };
+  for (const locationEvidence of [
+    { schema: 'forgeproof.location-evidence.v1', executionHost: { ...host, source: 'unknown' } },
+    { schema: 'forgeproof.location-evidence.v1', executionHost: { ...host, region: 'bad region' } },
+    { schema: 'forgeproof.location-evidence.v1', executionHost: { ...host, region: 'a'.repeat(257) } },
+    { schema: 'forgeproof.location-evidence.v1', executionHost: { ...host, coordinates: 'private' } },
+    { schema: 'forgeproof.location-evidence.v1', inference: { ...inference, source: 'OCI_IMDS_V2' } },
+    { schema: 'forgeproof.location-evidence.v1', inference: { ...inference, provider: 'openai' } },
+    { schema: 'forgeproof.location-evidence.v1', inference: { ...inference, responseSha256: 'D'.repeat(64) } },
+    { schema: 'forgeproof.location-evidence.v1', inference, extra: 'unverified' },
+  ]) assert.equal(lifecycleSchema.safeParse({ ...base, locationEvidence }).success, false);
+  const f = await fixture(t);
+  const old = await f.issue('source-write');
+  const evidence = (await f.git.getPublicLifecycleEvidence(old.id)).payload;
+  assert.equal(Object.hasOwn(evidence, 'locationEvidence'), false);
+  assert.equal(verifyLifecycleEnvelope((await f.records()).get(old.id)).payload.locationEvidence, undefined);
 });

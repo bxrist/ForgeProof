@@ -35,6 +35,22 @@ export const providerResidencyGuaranteeSchema = z.object({
 });
 export type ProviderResidencyGuarantee = z.infer<typeof providerResidencyGuaranteeSchema>;
 
+const locationLabel = z.string().min(1).max(256).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+export const locationEvidenceSchema = z.object({
+  schema: z.literal("forgeproof.location-evidence.v1"),
+  executionHost: z.object({
+    source: z.literal("OCI_IMDS_V2"),
+    region: locationLabel,
+    availabilityDomain: locationLabel.optional(),
+  }).strict().optional(),
+  inference: z.object({
+    source: z.literal("PROVIDER_RESPONSE"),
+    provider: z.literal("anthropic"),
+    geography: z.enum(["us", "global"]),
+    responseSha256: hash,
+  }).strict().optional(),
+}).strict().refine(value => JSON.stringify(value).length <= 1024, "Location evidence is too large");
+
 export const lifecycleSchema = z.object({
   project: projectIdSchema,
   stage: z.enum(["source-write", "commit", "build", "deployment", "rollback"]),
@@ -45,6 +61,7 @@ export const lifecycleSchema = z.object({
   tool: z.object({ name: label, version: label.optional() }).strict().optional(),
   model: z.object({ name: label, provider: label }).strict().optional(),
   providerResidencyGuarantee: providerResidencyGuaranteeSchema.optional(),
+  locationEvidence: locationEvidenceSchema.optional(),
   evidenceUri: z.string().url().max(2048).optional(),
 }).strict();
 export type LifecycleInput = z.infer<typeof lifecycleSchema>;
@@ -63,6 +80,7 @@ const payloadSchema = z.object({
   tool: lifecycleSchema.shape.tool,
   model: lifecycleSchema.shape.model,
   providerResidencyGuarantee: lifecycleSchema.shape.providerResidencyGuarantee,
+  locationEvidence: lifecycleSchema.shape.locationEvidence,
   evidenceUri: lifecycleSchema.shape.evidenceUri,
 }).strict();
 const envelopeSchema = z.object({
